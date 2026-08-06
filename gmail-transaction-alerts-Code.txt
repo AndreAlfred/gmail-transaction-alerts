@@ -353,13 +353,29 @@ function onOpen(){
     .addItem('Setup / Initialize','initializeWorkbook').addItem('Import Now','importNow')
     .addSubMenu(SpreadsheetApp.getUi().createMenu('Automatic Import').addItem('Every minute','schedule1').addItem('Every 5 minutes','schedule5').addItem('Every 10 minutes','schedule10').addItem('Every 15 minutes','schedule15').addItem('Every 30 minutes','schedule30').addItem('Every hour','schedule60'))
     .addItem('Disable Automatic Import','disableAutomaticImport').addSeparator()
-    .addItem('Reprocess Selected Issue','reprocessSelectedIssue').addItem('Diagnostics','showDiagnostics').addToUi();
+    .addItem('Reprocess Selected Issue','reprocessSelectedIssue')
+    .addItem('Go To Last Imported Row','goToLastImportedRow')
+    .addItem('Diagnostics','showDiagnostics').addToUi();
 }
 function reprocessSelectedIssue(){
   var s=SpreadsheetApp.getActiveSheet(); if(s.getName()!=='Import Issues'||s.getActiveRange().getRow()<2) throw new Error('Select an Import Issues row first.');
   var row=s.getActiveRange().getRow(), id=String(s.getRange(row,1).getValue()), msg=GmailApp.getMessageById(id); if(!msg||!isTrustedSender_(msg.getFrom())) throw new Error('Trusted source message was not found.');
   var label=GmailApp.getUserLabelByName(APP_CONFIG.labels.review); msg.getThread().removeLabel(label); s.deleteRow(row); importTransactionAlerts();
 }
+// Jumps the cursor to the last imported row. Rows written by older versions of
+// this script can sit hundreds of rows below the visible data; this finds them
+// without the user guessing where to scroll.
+function goToLastImportedRow(){
+  var ss=SpreadsheetApp.getActive(), sheet=ss.getSheetByName('Transactions');
+  if(!sheet) throw new Error('No Transactions sheet yet. Run Setup / Initialize.');
+  var map=getColumnMap_(sheet,TRANSACTION_HEADERS);
+  var last=lastUsedScriptRow_(sheet,map);
+  if(last<2){ SpreadsheetApp.getUi().alert('No imported rows yet.'); return; }
+  sheet.activate();
+  sheet.setActiveRange(sheet.getRange(last,1,1,sheet.getLastColumn()||TRANSACTION_HEADERS.length));
+  SpreadsheetApp.getActive().toast('Last imported row: '+last,'Transaction Alerts',8);
+}
+
 function getStatus_(key){
   var s=SpreadsheetApp.getActive().getSheetByName('Setup'); if(!s) return '';
   var values=s.getDataRange().getValues();
@@ -376,6 +392,10 @@ function showDiagnostics(){
   var triggerCount=ScriptApp.getProjectTriggers().filter(function(t){return t.getHandlerFunction()==='importTransactionAlerts';}).length;
   var sheet=SpreadsheetApp.getActive().getSheetByName('Transactions');
 
+  // Gmail labels are account-wide but writes go to THIS spreadsheet, so a user
+  // with two copies of the workbook can see labeled mail and an empty sheet.
+  lines.push('Workbook: '+SpreadsheetApp.getActive().getName());
+  lines.push('Workbook ID: '+SpreadsheetApp.getActive().getId());
   lines.push('Parser: '+APP_CONFIG.parserVersion);
   lines.push('Import triggers: '+triggerCount);
   lines.push('Trusted senders:');

@@ -24,6 +24,16 @@ This is a living file. Add to it when a bug or review turns up something that wa
 
 **How to apply.** Ask what makes a row **occupied**, not what makes it *yours*. `lastUsedScriptRow_` checks every script-owned column, so a manual row that fills Transaction Date / Merchant / Amount registers as occupied. In general, when a user shares a data structure with a program, the program's notion of "used" has to include entries the user created — otherwise the program's first act is to destroy them.
 
+### Read the label as evidence, and check what order the code writes it in
+
+**What happened.** A user reported "it's tagging the emails as Imported, so it's accessing them, it just isn't writing to the sheet." That reading is backwards. `thread.addLabel(labels.imported)` runs *after* `appendTransaction_` returns, and the only other path to that label is `hasMessageId_` returning true. So the label does not mean "the script saw the email" — it means **the row is already in the sheet**, either just written or found by dedup. That single observation eliminated three live hypotheses (untrusted sender, missing header, failing append), because each of those fails *before* the label is applied.
+
+**How to apply.** When a user reports a side effect, find where it is emitted and what must have already succeeded for control to reach that line. Side effects ordered after the real work are proof the work happened; the same side effect emitted first would have proved nothing. When adding a new side effect, place it after the operation it is meant to attest to — it becomes a free diagnostic later.
+
+### Gmail labels are account-wide; sheet writes are not
+
+A user with two copies of the workbook can see correctly labeled mail and an apparently empty sheet, because the labels are global to the Gmail account while `SpreadsheetApp.getActive()` resolves to whichever spreadsheet the script is bound to. Diagnostics prints the workbook name and ID so this is one glance to confirm rather than a long hunt.
+
 ### Hidden columns make "add a column to the right" ambiguous
 
 **What happened.** Columns I–M are hidden audit fields. To the user, column H (`Amount`) looks like the last column, so "I added columns to the right of the data" actually meant *inserted into the middle of the script's block*, silently shifting every hard-coded index. This is also why one added column worked and a later one didn't — the outcome depends entirely on where the insert landed.
