@@ -28,7 +28,7 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.0.0',
+  parserVersion: '1.1.0',
   trustedSenders: Object.freeze({
     'usaa.customer.service@omem.usaa.com': 'USAA',
     'no.reply.alerts@chase.com': 'Chase'
@@ -141,22 +141,33 @@ function parseChase_(subject, text) {
   return parseChasePurchase_(subject, text);
 }
 
-// Chase transaction alerts render as a two-cell HTML table row per field:
-//   <td>Merchant</td><td>SAMPLE*COFFEE SHOP</td>
-// htmlToText_ turns each </tr> into a newline, so every field lands on its own
-// line as "Label Value". The subject line is used only as a fallback.
+// Chase credit and debit purchase alerts both render each field as a nested
+// two-cell HTML table row. After htmlToText_, labels and values often land on
+// consecutive lines (source newlines between </td><td>), so field regexes use
+// \s* to bridge that. Credit labels: Account / Date / Merchant / Amount.
+// Debit labels: Account ending in / Made on / Description / Amount.
+// Subject (credit) or subject+headline (debit) are fallbacks only.
 function parseChasePurchase_(subject, text) {
   var subjectLine = String(subject || '');
   var body = normalizeText_(text);
+  var combined = normalizeText_(subjectLine + '\n' + body);
 
-  var account = body.match(/(?:^|\n)\s*Account\b\s*:?\s*([^\n]*?)\s*\(?\s*\.{3}\s*(\d{4})\s*\)?\s*(?:\n|$)/i);
-  var date = body.match(/(?:^|\n)\s*Date\b\s*:?\s*([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})/i);
-  var merchant = body.match(/(?:^|\n)\s*Merchant\b\s*:?\s*([^\n]+)/i);
+  var account = body.match(/(?:^|\n)\s*Account(?:\s+ending\s+in)?\b\s*:?\s*([^\n]*?)\s*\(?\s*\.{3}\s*(\d{4})\s*\)?\s*(?:\n|$)/i);
+  var date = body.match(/(?:^|\n)\s*(?:Date|Made on)\b\s*:?\s*([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})/i);
+  var merchant = body.match(/(?:^|\n)\s*(?:Merchant|Description)\b\s*:?\s*([^\n]+)/i);
   var amount = body.match(/(?:^|\n)\s*Amount\b\s*:?\s*(\$[\d,]+\.\d{2})/i);
 
-  var subjectMatch = subjectLine.match(/You made a\s+(\$[\d,]+(?:\.\d{2})?)\s+transaction with\s+(.+?)\s*$/i);
-  if (!merchant && subjectMatch) merchant = [null, subjectMatch[2]];
-  if (!amount && subjectMatch) amount = [null, subjectMatch[1]];
+  // Credit: "You made a $12.34 transaction with SAMPLE*COFFEE SHOP"
+  var creditSubject = subjectLine.match(/You made a\s+(\$[\d,]+(?:\.\d{2})?)\s+transaction with\s+(.+?)\s*$/i);
+  // Debit subject carries amount only; merchant is in the body headline.
+  var debitSubjectAmount = subjectLine.match(/debit card transaction of\s+(\$[\d,]+(?:\.\d{2})?)/i);
+  var debitHeadline = combined.match(/You made a debit card transaction of\s+(\$[\d,]+(?:\.\d{2})?)\s+with\s+([^\n]+)/i);
+
+  if (!merchant && creditSubject) merchant = [null, creditSubject[2]];
+  if (!amount && creditSubject) amount = [null, creditSubject[1]];
+  if (!merchant && debitHeadline) merchant = [null, debitHeadline[2]];
+  if (!amount && debitSubjectAmount) amount = [null, debitSubjectAmount[1]];
+  if (!amount && debitHeadline) amount = [null, debitHeadline[1]];
 
   if (!date || !merchant || !amount) {
     return { outcome: 'needs_review', institution: 'Chase', reason: 'Unsupported Chase alert format' };
@@ -168,10 +179,17 @@ function parseChasePurchase_(subject, text) {
     return { outcome: 'needs_review', institution: 'Chase', reason: 'Invalid Chase date or amount' };
   }
 
+  // Debit alerts put only "(...1234)" in the account row — no product name —
+  // so cardType becomes "debit" from the alert wording rather than inventing one.
+  var accountName = account ? String(account[1]).trim() : '';
+  var cardType = accountName
+    ? accountName.toLowerCase()
+    : (/debit card/i.test(combined) ? 'debit' : '');
+
   return { outcome: 'imported', transaction: {
     transactionDate: parsedDate,
     institution: 'Chase',
-    cardType: account ? String(account[1]).trim().toLowerCase() : '',
+    cardType: cardType,
     last4: account ? account[2] : '',
     cardholder: '',
     merchant: String(merchant[1]).trim(),
