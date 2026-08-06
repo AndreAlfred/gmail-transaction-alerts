@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Read parserVersion
+        id: ver
+        run: |
+          VERSION=$(node .github/scripts/extract-parser-version.js gmail-transaction-alerts-Code.gs)
+          TAG="${VERSION}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "parserVersion=$VERSION tag=$TAG"
+
+      - name: Check whether tag already exists
+        id: tag
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${TAG} already exists; skipping release."
+          elif git ls-remote --tags origin "refs/tags/${TAG}" | grep -q .; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${TAG} already exists on origin; skipping release."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Tag ${TAG} is new."
+          fi
+
+      - name: Create tag and GitHub Release
+        if: steps.tag.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG (parserVersion $VERSION)"
+          git push origin "$TAG"
+
+          PREAMBLE=$(printf '%s\n' \
+            "## Gmail Transaction Alerts $TAG" \
+            "" \
+            "Parser version: \`$VERSION\` (\`APP_CONFIG.parserVersion\`)." \
+            "" \
+            "Install by pasting [\`gmail-transaction-alerts-Code.gs\`](https://github.com/${{ github.repository }}/blob/${TAG}/gmail-transaction-alerts-Code.gs) into Apps Script \`Code.gs\` (or use the identical [\`.txt\`](https://github.com/${{ github.repository }}/blob/${TAG}/gmail-transaction-alerts-Code.txt) copy)." \
+            "" \
+            "### Changes" \
+            "")
+
+          # Write notes file: preamble + GitHub-generated notes
+          NOTES_FILE=$(mktemp)
+          printf '%s\n' "$PREAMBLE" > "$NOTES_FILE"
+
+          # generate_release_notes via API, then create release with combined body
+          GEN=$(gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name="$TAG" \
+            -f target_commitish="${{ github.sha }}" \
+            --jq .body)
+
+          printf '%s\n' "$GEN" >> "$NOTES_FILE"
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file "$NOTES_FILE" \
+            --target "${{ github.sha }}"
