@@ -1,4 +1,14 @@
-# Agent Handoff: Gmail Transaction Alerts → Google Sheets
+# AGENTS.md
+
+Instructions for coding agents working in this repository. Read this before changing a parser or the sheet write path. Human-facing setup lives in [`README.md`](README.md).
+
+**Quick reference**
+
+- Tests: `node --test tests/chase-purchase.test.js`
+- Authoritative source: `gmail-transaction-alerts-Code.gs`; regenerate the `.txt` copy after every change (`cp gmail-transaction-alerts-Code.gs gmail-transaction-alerts-Code.txt`)
+- Never commit real alert emails, real merchant/amount pairs, real card digits, live message IDs, or personal names — fixtures must be synthetic
+- Never widen the trusted-sender allowlist to make a parser pass
+- Never reintroduce a literal column index into the sheet write path
 
 ## What this project is
 

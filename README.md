@@ -49,7 +49,7 @@ Two details that make this safe: the append row is located by scanning the *Gmai
 node --test tests/chase-purchase.test.js
 ```
 
-Fixtures are synthetic. **Never commit a real alert email, real merchant/amount pairs, or real card digits** — redact to fictitious values that preserve the original wording and whitespace structure. Parser changes should be fixture-driven and test-first; see [`AGENT_HANDOFF.md`](AGENT_HANDOFF.md).
+Fixtures are synthetic. **Never commit a real alert email, real merchant/amount pairs, or real card digits** — redact to fictitious values that preserve the original wording and whitespace structure. Parser changes should be fixture-driven and test-first; see [`AGENTS.md`](AGENTS.md).
 
 ## Caveats
 

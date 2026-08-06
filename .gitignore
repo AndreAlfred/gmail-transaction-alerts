@@ -1,5 +1,5 @@
 # Never commit real bank alert emails or exported spreadsheet data.
-# Fixtures must be synthetic/redacted — see AGENT_HANDOFF.md.
+# Fixtures must be synthetic/redacted — see AGENTS.md.
 *.eml
 *.msg
 *.csv
