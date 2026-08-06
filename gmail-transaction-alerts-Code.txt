@@ -95,9 +95,23 @@ function parseMonthNameDate_(value) {
 }
 
 // ===== appsscript/Parsers.gs =====
+// Resolves a From header to an institution, or null if it is not on the
+// allowlist. Comparison is case-insensitive on BOTH sides: email addresses are
+// case-insensitive in practice, and a config edited with the capitalized
+// spelling used in the docs must still match. This is an exact-address check --
+// it is not a substring or domain match, and must never become one.
+function trustedInstitution_(sender) {
+  var normalized = normalizeSender_(sender);
+  var senders = APP_CONFIG.trustedSenders;
+  var keys = Object.keys(senders);
+  for (var i = 0; i < keys.length; i++) {
+    if (String(keys[i]).trim().toLowerCase() === normalized) return senders[keys[i]];
+  }
+  return null;
+}
+
 function parseAlert(sender, subject, htmlBody, plainBody) {
-  var normalizedSender = normalizeSender_(sender);
-  var institution = APP_CONFIG.trustedSenders[normalizedSender];
+  var institution = trustedInstitution_(sender);
   if (!institution) return { outcome: 'needs_review', reason: 'Untrusted sender' };
   var text = normalizeText_(plainBody || htmlToText_(htmlBody));
   if (institution === 'USAA') return parseUsaa_(text);
@@ -285,7 +299,7 @@ function setStatus_(key, value) {
 }
 
 // ===== appsscript/GmailIntake.gs =====
-function isTrustedSender_(sender) { return Object.prototype.hasOwnProperty.call(APP_CONFIG.trustedSenders, normalizeSender_(sender)); }
+function isTrustedSender_(sender) { return trustedInstitution_(sender) !== null; }
 function ensureLabels_() {
   Object.keys(APP_CONFIG.labels).forEach(function(k){ GmailApp.getUserLabelByName(APP_CONFIG.labels[k]) || GmailApp.createLabel(APP_CONFIG.labels[k]); });
 }
@@ -299,7 +313,7 @@ function fingerprint_(tx) { return [tx.institution,tx.transactionDate,tx.last4,t
 function messageModel_(message) { return { id:message.getId(), receivedAt:message.getDate().toISOString() }; }
 function importTransactionAlerts() {
   var lock = LockService.getScriptLock(); if (!lock.tryLock(1000)) return;
-  var counts={imported:0,ignored:0,review:0};
+  var counts={imported:0,ignored:0,review:0,errors:0};
   try {
     initializeWorkbook(); var labels={}; Object.keys(APP_CONFIG.labels).forEach(function(k){labels[k]=GmailApp.getUserLabelByName(APP_CONFIG.labels[k]);});
     GmailApp.search(buildGmailQuery_(),0,50).forEach(function(thread){ thread.getMessages().forEach(function(msg){
@@ -309,8 +323,15 @@ function importTransactionAlerts() {
         var parsed=parseAlert(sender,msg.getSubject(),msg.getBody(),msg.getPlainBody());
         if(parsed.outcome==='imported'){ appendTransaction_(parsed.transaction,model,fingerprint_(parsed.transaction)); thread.addLabel(labels.imported); counts.imported++; setStatus_('Last Imported Transaction',parsed.transaction.transactionDate+' '+parsed.transaction.merchant); }
         else if(parsed.outcome==='ignored'){ thread.addLabel(labels.ignored); counts.ignored++; }
-        else { recordIssue_(model,parsed.institution || APP_CONFIG.trustedSenders[sender],parsed.reason); thread.addLabel(labels.review); counts.review++; }
-      } catch(e) { setStatus_('Last Error','Retryable error: '+String(e.message||e).slice(0,200)); }
+        else { recordIssue_(model,parsed.institution || trustedInstitution_(sender),parsed.reason); thread.addLabel(labels.review); counts.review++; }
+      } catch(e) {
+        // No terminal label, so the message is retried next run. Counted and
+        // timestamped because a swallowed failure here looks exactly like
+        // "nothing is importing" from the user's side.
+        counts.errors++;
+        setStatus_('Last Error','Retryable error: '+String(e.message||e).slice(0,200));
+        setStatus_('Last Error At', new Date());
+      }
     }); });
     setStatus_('Last Checked',new Date()); setStatus_('Last Result',JSON.stringify(counts));
   } finally { lock.releaseLock(); }
@@ -339,7 +360,52 @@ function reprocessSelectedIssue(){
   var row=s.getActiveRange().getRow(), id=String(s.getRange(row,1).getValue()), msg=GmailApp.getMessageById(id); if(!msg||!isTrustedSender_(msg.getFrom())) throw new Error('Trusted source message was not found.');
   var label=GmailApp.getUserLabelByName(APP_CONFIG.labels.review); msg.getThread().removeLabel(label); s.deleteRow(row); importTransactionAlerts();
 }
+function getStatus_(key){
+  var s=SpreadsheetApp.getActive().getSheetByName('Setup'); if(!s) return '';
+  var values=s.getDataRange().getValues();
+  for(var i=1;i<values.length;i++) if(values[i][0]===key) return String(values[i][1]);
+  return '';
+}
+
+// Answers the question users actually have: "the script says it imported
+// something, so where is it?" Reports the header check, the row count, and the
+// exact row the next import will write to.
 function showDiagnostics(){
-  ensureLabels_(); var triggerCount=ScriptApp.getProjectTriggers().filter(function(t){return t.getHandlerFunction()==='importTransactionAlerts';}).length;
-  SpreadsheetApp.getUi().alert('Transaction Alerts','Sheets ready: '+Boolean(SpreadsheetApp.getActive().getSheetByName('Transactions'))+'\nImport triggers: '+triggerCount+'\nParser: '+APP_CONFIG.parserVersion,SpreadsheetApp.getUi().ButtonSet.OK);
+  ensureLabels_();
+  var lines=[];
+  var triggerCount=ScriptApp.getProjectTriggers().filter(function(t){return t.getHandlerFunction()==='importTransactionAlerts';}).length;
+  var sheet=SpreadsheetApp.getActive().getSheetByName('Transactions');
+
+  lines.push('Parser: '+APP_CONFIG.parserVersion);
+  lines.push('Import triggers: '+triggerCount);
+  lines.push('Trusted senders:');
+  Object.keys(APP_CONFIG.trustedSenders).forEach(function(k){ lines.push('  '+k+' -> '+APP_CONFIG.trustedSenders[k]); });
+
+  if(!sheet){
+    lines.push('\nTransactions sheet: MISSING. Run Setup / Initialize.');
+  } else {
+    try {
+      var map=getColumnMap_(sheet,TRANSACTION_HEADERS);
+      var last=lastUsedScriptRow_(sheet,map);
+      lines.push('\nHeader row: OK (all 13 columns found)');
+      lines.push('Rows in use: '+Math.max(0,last-1));
+      lines.push('Next import writes to row: '+(last+1));
+      lines.push('Sheet last row (incl. your formulas): '+sheet.getLastRow());
+      if(sheet.getLastRow()>last+1){
+        lines.push('NOTE: your formulas extend past the data. That is fine --');
+        lines.push('imports are placed by the columns above, not by that number.');
+      }
+    } catch(e){
+      lines.push('\nHEADER ROW PROBLEM -- imports cannot be written:');
+      lines.push('  '+String(e.message||e));
+    }
+  }
+
+  var lastError=getStatus_('Last Error');
+  lines.push('\nLast checked: '+(getStatus_('Last Checked')||'never'));
+  lines.push('Last result: '+(getStatus_('Last Result')||'n/a'));
+  lines.push('Last imported: '+(getStatus_('Last Imported Transaction')||'none'));
+  if(lastError) lines.push('LAST ERROR ('+(getStatus_('Last Error At')||'unknown time')+'): '+lastError);
+
+  SpreadsheetApp.getUi().alert('Transaction Alerts Diagnostics',lines.join('\n'),SpreadsheetApp.getUi().ButtonSet.OK);
 }
