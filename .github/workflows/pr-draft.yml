@@ -1,0 +1,64 @@
+name: PR draft
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  pr-draft:
+    name: pr-draft
+    runs-on: ubuntu-latest
+    # Best-effort: missing secret or draft PRs should not block merges.
+    # Branch protection must NOT require this check.
+    if: >
+      github.event.pull_request.draft == false &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-ai-draft')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Skip if no OpenAI key
+        id: key
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "OPENAI_API_KEY secret is not set; skipping AI PR draft."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect diff and commits
+        if: steps.key.outputs.present == 'true'
+        run: |
+          git fetch origin main --depth=1
+          git diff origin/main...HEAD > /tmp/pr.diff
+          git log --format='%s' origin/main..HEAD > /tmp/pr.commits
+          echo "Diff bytes: $(wc -c < /tmp/pr.diff)"
+          echo "Commits:"
+          cat /tmp/pr.commits || true
+
+      - name: Draft title and body with OpenAI
+        if: steps.key.outputs.present == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          DIFF_PATH: /tmp/pr.diff
+          COMMITS_PATH: /tmp/pr.commits
+        run: node .github/scripts/draft-pr.js
