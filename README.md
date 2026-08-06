@@ -56,3 +56,12 @@ Fixtures are synthetic. **Never commit a real alert email, real merchant/amount 
 - This is an **authorization-alert log, not a posted bank ledger.** Tips, refunds, reversals, and final posted amounts can differ from the alert.
 - Chase alerts contain no cardholder name, so that column is blank on Chase rows. It is left empty rather than inferred.
 - Only alerts that arrive as email are captured. If an alert doesn't fire, there's no row.
+
+## Contributing
+
+- [`AGENTS.md`](AGENTS.md) — working instructions and constraints. Duplicated byte-identically as `CLAUDE.md`; change both together.
+- [`LESSONS.md`](LESSONS.md) — the non-obvious failures this project has already hit, and why the code is shaped the way it is. Worth reading before touching the sheet write path or a parser.
+
+## License
+
+[MIT](LICENSE) © 2026 Andrew Trimble. Provided as is, without warranty — see the license text, and the caveats above, before relying on it for anything financial.
