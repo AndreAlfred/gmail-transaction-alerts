@@ -52,9 +52,12 @@ Current parser coverage:
 1. **USAA purchase authorizations** matching wording like:
    `Your credit card ...7484 was charged $7.56 at MERCHANT.`
    followed by Date and Cardholder name fields.
-2. **Chase merchant purchases**, e.g. subject `You made a $12.34 transaction with SAMPLE*COFFEE SHOP`. Chase renders each field as a two-cell HTML table row (`<td>Merchant</td><td>…</td>`); `htmlToText_` converts each `</tr>` to a newline, so every field lands on its own line as `Label Value`. Merchant and amount fall back to the subject line if the body layout changes. **Chase alerts carry no cardholder name**, so that column is left empty rather than fabricated.
-3. **Chase scheduled credit-card payments**, which are recognized but intentionally ignored because they are not merchant purchases.
-4. Other trusted-sender formats are sent to **Import Issues** and labeled **Needs Review** rather than silently discarded.
+2. **Chase credit-card merchant purchases**, e.g. subject `You made a $12.34 transaction with SAMPLE*COFFEE SHOP`. Field labels: Account / Date / Merchant / Amount. Merchant and amount fall back to the subject line if the body layout changes. Card Type is the Account product name (lowercased).
+3. **Chase debit-card purchases**, e.g. subject `Your debit card transaction of $12.34 from account ending in (…1234)`. Field labels differ: Account ending in / Made on / Description / Amount. Merchant falls back to the body headline (`You made a debit card transaction of $… with MERCHANT`); amount can fall back to the subject. Card Type is `debit` because the account row carries only `(...last4)`.
+4. **Chase scheduled credit-card payments**, which are recognized but intentionally ignored because they are not merchant purchases.
+5. Other trusted-sender formats are sent to **Import Issues** and labeled **Needs Review** rather than silently discarded.
+
+Chase credit and debit alerts both render fields as nested two-cell HTML table rows. After `htmlToText_`, the label and value often land on consecutive lines (source newlines between `</td>` and `<td>`), so parsers bridge with `\s*` rather than requiring `Label Value` on one line. **Chase alerts carry no cardholder name**, so that column is left empty rather than fabricated.
 
 The Transactions sheet contains:
 
@@ -164,16 +167,17 @@ Local synthetic tests cover:
 - exact trusted-sender matching
 - allowed polling intervals
 
-Plus, in `tests/chase-purchase.test.js` against `fixtures/chase-purchase-alert.html`:
+Plus, in `tests/chase-purchase.test.js` against `fixtures/chase-purchase-alert.html` and `fixtures/chase-debit-purchase-alert.html`:
 
-- Chase merchant-purchase extraction from the alert body
-- subject-line fallback for merchant and amount
+- Chase credit merchant-purchase extraction from the alert body
+- Chase credit Account product name preserved as cardType
+- Chase debit purchase extraction (Made on / Description / Account ending in)
+- subject-line fallback for credit merchant and amount
+- debit headline/subject fallback for merchant and amount
 - Chase purchase with no recoverable date routed to review
 - scheduled payment still ignored, not imported
 - purchase-shaped alert from a lookalike sender rejected
 - month-name date parsing across abbreviations
-
-At the latest verified state, the Chase suite reports **6 passed, 0 failed**. The pre-existing suite has not been re-run since the column-mapping change — its transaction-row column-order test asserts against the old fixed-index write path and may need updating.
 
 The code has not yet completed a real Google Apps Script smoke test. Remaining verification:
 
