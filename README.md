@@ -48,10 +48,46 @@ Two details that make this safe: the append row is located by scanning every scr
 ## Tests
 
 ```bash
-node --test tests/chase-purchase.test.js
+node --test tests/*.test.js
 ```
 
 Fixtures are synthetic. **Never commit a real alert email, real merchant/amount pairs, or real card digits** — redact to fictitious values that preserve the original wording and whitespace structure. Parser changes should be fixture-driven and test-first; see [`AGENTS.md`](AGENTS.md).
+
+## Releasing
+
+The release version is `APP_CONFIG.parserVersion` in `gmail-transaction-alerts-Code.gs` (must match the `.txt` copy). Tags and GitHub Releases use `{parserVersion}` with no `v` prefix (e.g. `1.1.0`).
+
+**When you change the script** (`.gs` / `.txt`):
+
+1. Bump `parserVersion` in the `.gs` file.
+2. `cp gmail-transaction-alerts-Code.gs gmail-transaction-alerts-Code.txt` (CI requires the two files to be **byte-identical**, not merely the same version string).
+3. Open a PR to `main`. CI fails if the version is still the same as `main`, or if the two files differ in any byte.
+4. After merge, the release workflow creates tag `X.Y.Z` (if new) and a GitHub Release with generated notes.
+
+| Change | Bump |
+|---|---|
+| Parser behavior / new alert type / sheet write semantics | minor (major if the sheet column contract breaks) |
+| Bug fix preserving behavior | patch |
+| Docs / CI / tests only (no `.gs` / `.txt`) | no bump |
+
+CI does not edit the version for you. An advisory PR comment may suggest patch/minor/major when script files change.
+
+Use GitHub Copilot’s built-in PR title/description helper when opening a pull request (no custom Action).
+
+### Branch protection on `main`
+
+After the workflows have run at least once (so check names appear in the UI), configure a **ruleset** (Settings → Rules → Rulesets) or classic branch protection:
+
+1. Target branch: `main`
+2. Block force pushes and deletions
+3. Require a pull request before merging
+4. **Require status checks to pass:**
+   - `tests` (job from `.github/workflows/ci.yml`)
+   - `version-check` (job from `.github/workflows/version-check.yml`)
+5. Do **not** require `release`
+6. Optional: require conversation resolution; require linear history
+
+Exact check names must match the workflow job `name:` fields above. If a check is missing from the dropdown, merge or open a PR that runs the workflow once, then re-open the ruleset editor.
 
 ## Caveats
 
