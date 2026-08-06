@@ -3,6 +3,10 @@ name: Release
 on:
   push:
     branches: [main]
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -10,12 +14,29 @@ permissions:
 jobs:
   release:
     name: release
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve target commit
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            SHA="${{ github.event.pull_request.merge_commit_sha }}"
+          else
+            SHA="${{ github.sha }}"
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Release target: $SHA"
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ steps.target.outputs.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -53,6 +74,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.ver.outputs.version }}
           TAG: ${{ steps.ver.outputs.tag }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -79,7 +101,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             "/repos/${{ github.repository }}/releases/generate-notes" \
             -f tag_name="$TAG" \
-            -f target_commitish="${{ github.sha }}" \
+            -f target_commitish="$TARGET_SHA" \
             --jq .body)
 
           printf '%s\n' "$GEN" >> "$NOTES_FILE"
@@ -87,4 +109,4 @@ jobs:
           gh release create "$TAG" \
             --title "$TAG" \
             --notes-file "$NOTES_FILE" \
-            --target "${{ github.sha }}"
+            --target "$TARGET_SHA"
