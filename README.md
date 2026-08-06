@@ -9,7 +9,7 @@ It deliberately does one thing: **detect a supported transaction-alert email, ex
 | Institution | Sender | Handling |
 |---|---|---|
 | USAA | `USAA.customer.service@omem.usaa.com` | Purchase authorizations imported |
-| Chase | `no.reply.alerts@chase.com` | Merchant purchases imported; scheduled card payments ignored |
+| Chase | `no.reply.alerts@chase.com` | Credit and debit merchant purchases imported; scheduled card payments ignored |
 
 Anything else from a trusted sender is routed to an **Import Issues** sheet and labeled **Needs Review** rather than silently dropped. Mail from any other sender is rejected outright.
 

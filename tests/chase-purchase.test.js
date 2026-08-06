@@ -43,8 +43,14 @@ const FIXTURE_HTML = fs.readFileSync(
   'utf8'
 );
 const FIXTURE_SUBJECT = 'You made a $12.34 transaction with SAMPLE*COFFEE SHOP';
+const DEBIT_FIXTURE_HTML = fs.readFileSync(
+  path.resolve(__dirname, '..', 'fixtures', 'chase-debit-purchase-alert.html'),
+  'utf8'
+);
+const DEBIT_FIXTURE_SUBJECT =
+  'Your debit card transaction of $45.67 from account ending in (\u20261234)';
 
-test('Chase merchant purchase is extracted from the alert body', () => {
+test('Chase credit merchant purchase is extracted from the alert body', () => {
   const result = parseAlert(CHASE_SENDER, FIXTURE_SUBJECT, FIXTURE_HTML, '');
   assert.strictEqual(result.outcome, 'imported');
   // Spread copies the value into this realm; objects built inside the vm
@@ -60,6 +66,68 @@ test('Chase merchant purchase is extracted from the alert body', () => {
     amount: 12.34,
     eventType: 'purchase_authorization'
   });
+});
+
+test('Chase credit Account row keeps the product name as cardType', () => {
+  // Mirrors live credit alerts: label and value on consecutive lines after
+  // htmlToText_, with a named product before (...last4).
+  const body = [
+    '<html><body>',
+    '<tr><td>Account</td><td>Sample Freedom Unlimited Visa (...4321)</td></tr>',
+    '<tr><td>Date</td><td>Aug 6, 2026 at 12:05 AM ET</td></tr>',
+    '<tr><td>Merchant</td><td>SAMPLE*SOFTWARE INC</td></tr>',
+    '<tr><td>Amount</td><td>$80.00</td></tr>',
+    '</body></html>'
+  ].join('');
+  const subject = 'You made a $80.00 transaction with SAMPLE*SOFTWARE INC';
+  const result = parseAlert(CHASE_SENDER, subject, body, '');
+  assert.strictEqual(result.outcome, 'imported');
+  assert.deepStrictEqual({ ...result.transaction }, {
+    transactionDate: '2026-08-06',
+    institution: 'Chase',
+    cardType: 'sample freedom unlimited visa',
+    last4: '4321',
+    cardholder: '',
+    merchant: 'SAMPLE*SOFTWARE INC',
+    amount: 80,
+    eventType: 'purchase_authorization'
+  });
+});
+
+test('Chase debit purchase is extracted from debit field labels', () => {
+  const result = parseAlert(CHASE_SENDER, DEBIT_FIXTURE_SUBJECT, DEBIT_FIXTURE_HTML, '');
+  assert.strictEqual(result.outcome, 'imported');
+  assert.deepStrictEqual({ ...result.transaction }, {
+    transactionDate: '2026-08-05',
+    institution: 'Chase',
+    cardType: 'debit',
+    last4: '1234',
+    cardholder: '',
+    merchant: 'SAMPLE*WATER UTILITY',
+    amount: 45.67,
+    eventType: 'purchase_authorization'
+  });
+});
+
+test('Chase debit merchant and amount fall back to subject/headline', () => {
+  // Body retains only Made on, as if the field table changed shape.
+  const body = '<html><body><tr><td>Made on</td><td>Aug 5, 2026 at 7:18 AM ET</td></tr></body></html>';
+  const result = parseAlert(CHASE_SENDER, DEBIT_FIXTURE_SUBJECT, body, '');
+  // Subject has amount but not merchant; without the headline, merchant is missing.
+  assert.strictEqual(result.outcome, 'needs_review');
+
+  const withHeadline = [
+    '<html><body>',
+    '<tr><td>You made a debit card transaction of $45.67 with SAMPLE*WATER UTILITY</td></tr>',
+    '<tr><td>Made on</td><td>Aug 5, 2026 at 7:18 AM ET</td></tr>',
+    '</body></html>'
+  ].join('');
+  const fallback = parseAlert(CHASE_SENDER, DEBIT_FIXTURE_SUBJECT, withHeadline, '');
+  assert.strictEqual(fallback.outcome, 'imported');
+  assert.strictEqual(fallback.transaction.merchant, 'SAMPLE*WATER UTILITY');
+  assert.strictEqual(fallback.transaction.amount, 45.67);
+  assert.strictEqual(fallback.transaction.cardType, 'debit');
+  assert.strictEqual(fallback.transaction.last4, '');
 });
 
 test('Chase merchant and amount fall back to the subject line', () => {
