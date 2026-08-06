@@ -72,14 +72,7 @@ The release version is `APP_CONFIG.parserVersion` in `gmail-transaction-alerts-C
 
 CI does not edit the version for you. An advisory PR comment may suggest patch/minor/major when script files change.
 
-### CI secrets and variables
-
-| Name | Where | Required for |
-|---|---|---|
-| `OPENAI_API_KEY` | Repository secret | AI PR title/body drafts (`pr-draft` workflow) |
-| `OPENAI_MODEL` | Repository variable (optional) | Overrides default model `gpt-4o-mini` |
-
-Add the label `skip-ai-draft` on a PR to skip the AI rewriter. The `pr-draft` check is best-effort and must **not** be a required status check.
+Use GitHub Copilot’s built-in PR title/description helper when opening a pull request (no custom Action).
 
 ### Branch protection on `main`
 
@@ -91,7 +84,7 @@ After the workflows have run at least once (so check names appear in the UI), co
 4. **Require status checks to pass:**
    - `tests` (job from `.github/workflows/ci.yml`)
    - `version-check` (job from `.github/workflows/version-check.yml`)
-5. Do **not** require `pr-draft` or `release`
+5. Do **not** require `release`
 6. Optional: require conversation resolution; require linear history
 
 Exact check names must match the workflow job `name:` fields above. If a check is missing from the dropdown, merge or open a PR that runs the workflow once, then re-open the ruleset editor.
