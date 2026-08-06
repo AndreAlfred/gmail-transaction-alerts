@@ -62,7 +62,7 @@ The release version is `APP_CONFIG.parserVersion` in `gmail-transaction-alerts-C
 1. Bump `parserVersion` in the `.gs` file.
 2. `cp gmail-transaction-alerts-Code.gs gmail-transaction-alerts-Code.txt` (CI requires the two files to be **byte-identical**, not merely the same version string).
 3. Open a PR to `main`. CI fails if the version is still the same as `main`, or if the two files differ in any byte.
-4. After merge, the release workflow creates tag `X.Y.Z` (if new) and a GitHub Release with generated notes.
+4. After merge, the release workflow creates tag `X.Y.Z` (if new) and a GitHub Release with generated notes. It runs on merged PR close (primary), push to `main`, or manual **Run workflow** (`workflow_dispatch`). Duplicate runs are safe: an existing tag is skipped.
 
 | Change | Bump |
 |---|---|
