@@ -1,0 +1,331 @@
+/**
+ * Gmail Transaction Alerts -> Google Sheets
+ * Google Apps Script. Paste this whole file into Code.gs.
+ *
+ * INSTALL
+ *   1. Open your budget spreadsheet, then Extensions > Apps Script.
+ *   2. Select everything in Code.gs and replace it with this entire file.
+ *   3. Save, then reload the spreadsheet tab.
+ *   4. Menu: Transaction Alerts > Setup / Initialize (authorize when prompted).
+ *   5. Menu: Transaction Alerts > Import Now.
+ *   6. Menu: Transaction Alerts > Automatic Import > Every 5 minutes.
+ *
+ * ADDING YOUR OWN COLUMNS
+ *   You can add category/formula columns anywhere on the Transactions sheet.
+ *   The script finds its own columns by the header text in row 1, so do not
+ *   rename or delete these thirteen headers:
+ *     Imported At, Transaction Date, Institution, Card Type, Last 4,
+ *     Cardholder, Merchant, Amount, Gmail Message ID, Email Received At,
+ *     Event Type, Parser Version, Fingerprint
+ *   (The last five are hidden audit columns. If a header is missing, the
+ *   import stops with an error naming it instead of writing to the wrong place.)
+ *
+ * NOTES
+ *   Chase alerts do not include a cardholder name, so that cell is blank on
+ *   Chase rows. This is an authorization-alert log, not a posted bank ledger:
+ *   tips, refunds, and final posted amounts can differ.
+ */
+
+// ===== appsscript/Config.gs =====
+var APP_CONFIG = Object.freeze({
+  parserVersion: '1.0.0',
+  trustedSenders: Object.freeze({
+    'usaa.customer.service@omem.usaa.com': 'USAA',
+    'no.reply.alerts@chase.com': 'Chase'
+  }),
+  supportedIntervals: Object.freeze([1, 5, 10, 15, 30, 60]),
+  labels: Object.freeze({
+    imported: 'Bank Transactions/Imported',
+    ignored: 'Bank Transactions/Ignored',
+    review: 'Bank Transactions/Needs Review'
+  })
+});
+
+// ===== appsscript/Text.gs =====
+function decodeHtmlEntities_(value) {
+  var entities = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+  return String(value || '').replace(/&(#x?[0-9a-f]+|amp|lt|gt|quot|apos|nbsp);/gi, function (_, key) {
+    var lower = key.toLowerCase();
+    if (lower.charAt(0) === '#') {
+      var hex = lower.charAt(1) === 'x';
+      return String.fromCharCode(parseInt(lower.slice(hex ? 2 : 1), hex ? 16 : 10));
+    }
+    return entities[lower] || _;
+  });
+}
+
+function htmlToText_(html) {
+  return decodeHtmlEntities_(String(html || '')
+    .replace(/<\s*br\s*\/?>/gi, '\n').replace(/<\/\s*(p|div|tr|li|h[1-6])\s*>/gi, '\n')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' '));
+}
+
+function normalizeText_(value) {
+  return String(value || '').replace(/\r/g, '\n').replace(/[\t\f\v ]+/g, ' ')
+    .replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function normalizeSender_(value) {
+  var text = String(value || '').trim().toLowerCase();
+  var match = text.match(/<([^>]+)>/);
+  return (match ? match[1] : text).trim();
+}
+
+function parseAmount_(value) { return Number(String(value).replace(/[$,\s]/g, '')); }
+
+function parseUsDate_(value) {
+  var m = String(value).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+  if (!m) return null;
+  var year = Number(m[3]); if (year < 100) year += 2000;
+  return String(year) + '-' + String(Number(m[1])).padStart(2, '0') + '-' + String(Number(m[2])).padStart(2, '0');
+}
+
+var MONTH_NAMES_ = Object.freeze({ jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 });
+
+// "Aug 4, 2026" / "August 4, 2026" / "Sept. 4, 2026" -> "2026-08-04"
+function parseMonthNameDate_(value) {
+  var m = String(value).match(/^\s*([A-Za-z]{3,9})\.?\s+(\d{1,2}),\s*(\d{4})\s*$/);
+  if (!m) return null;
+  var month = MONTH_NAMES_[m[1].slice(0, 3).toLowerCase()];
+  if (!month) return null;
+  var day = Number(m[2]);
+  if (day < 1 || day > 31) return null;
+  return m[3] + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+}
+
+// ===== appsscript/Parsers.gs =====
+function parseAlert(sender, subject, htmlBody, plainBody) {
+  var normalizedSender = normalizeSender_(sender);
+  var institution = APP_CONFIG.trustedSenders[normalizedSender];
+  if (!institution) return { outcome: 'needs_review', reason: 'Untrusted sender' };
+  var text = normalizeText_(plainBody || htmlToText_(htmlBody));
+  if (institution === 'USAA') return parseUsaa_(text);
+  return parseChase_(subject, text);
+}
+
+function parseUsaa_(text) {
+  var charge = text.match(/Your\s+(.+?)\s+\.{3}\s*(\d{4})\s+was charged\s+(\$[\d,]+(?:\.\d{2})?)\s+at\s+(.+?)(?=\n\s*Date\s*:)/i);
+  var date = text.match(/Date\s*:\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+  var holder = text.match(/Cardholder\s*name\s*:\s*([^\n]+)/i);
+  if (!charge || !date || !holder) return { outcome: 'needs_review', reason: 'Unsupported or incomplete USAA alert' };
+  var parsedDate = parseUsDate_(date[1]);
+  var amount = parseAmount_(charge[3]);
+  if (!parsedDate || !Number.isFinite(amount)) return { outcome: 'needs_review', reason: 'Invalid USAA date or amount' };
+  return { outcome: 'imported', transaction: {
+    transactionDate: parsedDate, institution: 'USAA', cardType: charge[1].trim().toLowerCase(),
+    last4: charge[2], cardholder: holder[1].trim(), merchant: charge[4].trim(), amount: amount,
+    eventType: 'purchase_authorization'
+  }};
+}
+
+function parseChase_(subject, text) {
+  var combined = normalizeText_((subject || '') + '\n' + text);
+  if (/Payment scheduled/i.test(combined) && /credit card payment/i.test(combined)) {
+    return { outcome: 'ignored', institution: 'Chase', eventType: 'card_payment_scheduled', reason: 'Scheduled card payment is not a merchant purchase' };
+  }
+  return parseChasePurchase_(subject, text);
+}
+
+// Chase transaction alerts render as a two-cell HTML table row per field:
+//   <td>Merchant</td><td>SAMPLE*COFFEE SHOP</td>
+// htmlToText_ turns each </tr> into a newline, so every field lands on its own
+// line as "Label Value". The subject line is used only as a fallback.
+function parseChasePurchase_(subject, text) {
+  var subjectLine = String(subject || '');
+  var body = normalizeText_(text);
+
+  var account = body.match(/(?:^|\n)\s*Account\b\s*:?\s*([^\n]*?)\s*\(?\s*\.{3}\s*(\d{4})\s*\)?\s*(?:\n|$)/i);
+  var date = body.match(/(?:^|\n)\s*Date\b\s*:?\s*([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})/i);
+  var merchant = body.match(/(?:^|\n)\s*Merchant\b\s*:?\s*([^\n]+)/i);
+  var amount = body.match(/(?:^|\n)\s*Amount\b\s*:?\s*(\$[\d,]+\.\d{2})/i);
+
+  var subjectMatch = subjectLine.match(/You made a\s+(\$[\d,]+(?:\.\d{2})?)\s+transaction with\s+(.+?)\s*$/i);
+  if (!merchant && subjectMatch) merchant = [null, subjectMatch[2]];
+  if (!amount && subjectMatch) amount = [null, subjectMatch[1]];
+
+  if (!date || !merchant || !amount) {
+    return { outcome: 'needs_review', institution: 'Chase', reason: 'Unsupported Chase alert format' };
+  }
+
+  var parsedDate = parseMonthNameDate_(date[1]);
+  var parsedAmount = parseAmount_(amount[1]);
+  if (!parsedDate || !Number.isFinite(parsedAmount)) {
+    return { outcome: 'needs_review', institution: 'Chase', reason: 'Invalid Chase date or amount' };
+  }
+
+  return { outcome: 'imported', transaction: {
+    transactionDate: parsedDate,
+    institution: 'Chase',
+    cardType: account ? String(account[1]).trim().toLowerCase() : '',
+    last4: account ? account[2] : '',
+    cardholder: '',
+    merchant: String(merchant[1]).trim(),
+    amount: parsedAmount,
+    eventType: 'purchase_authorization'
+  }};
+}
+
+// ===== appsscript/Workbook.gs =====
+var TRANSACTION_HEADERS = ['Imported At','Transaction Date','Institution','Card Type','Last 4','Cardholder','Merchant','Amount','Gmail Message ID','Email Received At','Event Type','Parser Version','Fingerprint'];
+var ISSUE_HEADERS = ['Gmail Message ID','Email Received At','Institution','Parser Version','Reason'];
+
+function getOrCreateSheet_(name, headers) {
+  var ss = SpreadsheetApp.getActive(); var sheet = ss.getSheetByName(name) || ss.insertSheet(name);
+  if (sheet.getLastRow() === 0) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.setFrozenRows(1); return sheet;
+}
+
+// Resolves each required header to its actual column number, so user-added
+// columns anywhere in the sheet cannot shift the script's writes.
+function getColumnMap_(sheet, headers) {
+  var width = Math.max(sheet.getLastColumn(), headers.length);
+  var headerRow = sheet.getRange(1, 1, 1, width).getValues()[0];
+  var map = {};
+  headerRow.forEach(function (name, i) {
+    var key = String(name).trim();
+    if (key && !Object.prototype.hasOwnProperty.call(map, key)) map[key] = i + 1;
+  });
+  var missing = headers.filter(function (h) { return !map[h]; });
+  if (missing.length) {
+    throw new Error('The Transactions header row is missing required column(s): ' + missing.join(', ') +
+      '. Restore the header text exactly, then run Setup / Initialize.');
+  }
+  return map;
+}
+
+// The last row the SCRIPT wrote. Deliberately ignores getLastRow(), which counts
+// user formulas filled down the sheet and would push appends far below the data.
+function lastScriptRow_(sheet, map) {
+  var maxRows = sheet.getMaxRows();
+  if (maxRows < 2) return 1;
+  var ids = sheet.getRange(2, map['Gmail Message ID'], maxRows - 1, 1).getValues();
+  for (var i = ids.length - 1; i >= 0; i--) {
+    if (String(ids[i][0]).trim() !== '') return i + 2;
+  }
+  return 1;
+}
+
+function initializeWorkbook() {
+  var ss = SpreadsheetApp.getActive();
+  var isNewSheet = !ss.getSheetByName('Transactions');
+  var tx = getOrCreateSheet_('Transactions', TRANSACTION_HEADERS);
+  var map = getColumnMap_(tx, TRANSACTION_HEADERS);
+  tx.getRange(1, map['Imported At'], tx.getMaxRows(), 1).setNumberFormat('yyyy-mm-dd hh:mm');
+  tx.getRange(1, map['Transaction Date'], tx.getMaxRows(), 1).setNumberFormat('yyyy-mm-dd');
+  tx.getRange(1, map['Amount'], tx.getMaxRows(), 1).setNumberFormat('$#,##0.00');
+  // Only hide audit columns on first creation; never re-hide columns the user unhid.
+  if (isNewSheet) {
+    ['Gmail Message ID','Email Received At','Event Type','Parser Version','Fingerprint']
+      .forEach(function (h) { tx.hideColumns(map[h], 1); });
+  }
+  getOrCreateSheet_('Setup', ['Setting','Value']); getOrCreateSheet_('Import Issues', ISSUE_HEADERS);
+  ensureLabels_(); setStatus_('Initialized', new Date());
+}
+function transactionValues_(tx, message, fingerprint) {
+  return {
+    'Imported At': new Date().toISOString(),
+    'Transaction Date': tx.transactionDate,
+    'Institution': tx.institution,
+    'Card Type': tx.cardType,
+    'Last 4': tx.last4,
+    'Cardholder': tx.cardholder,
+    'Merchant': tx.merchant,
+    'Amount': tx.amount,
+    'Gmail Message ID': message.id,
+    'Email Received At': message.receivedAt,
+    'Event Type': tx.eventType,
+    'Parser Version': APP_CONFIG.parserVersion,
+    'Fingerprint': fingerprint
+  };
+}
+function hasMessageId_(id) {
+  var s = SpreadsheetApp.getActive().getSheetByName('Transactions');
+  if (!s || s.getMaxRows() < 2) return false;
+  var map = getColumnMap_(s, TRANSACTION_HEADERS);
+  var last = lastScriptRow_(s, map);
+  if (last < 2) return false;
+  return s.getRange(2, map['Gmail Message ID'], last - 1, 1).getValues()
+    .some(function (r) { return String(r[0]) === String(id); });
+}
+function appendTransaction_(tx, message, fingerprint) {
+  var s = getOrCreateSheet_('Transactions', TRANSACTION_HEADERS);
+  var map = getColumnMap_(s, TRANSACTION_HEADERS);
+  var row = lastScriptRow_(s, map) + 1;
+  if (row > s.getMaxRows()) s.insertRowsAfter(s.getMaxRows(), 1);
+  var values = transactionValues_(tx, message, fingerprint);
+  // Written cell-by-cell so user columns between/around them keep their formulas.
+  TRANSACTION_HEADERS.forEach(function (header) {
+    s.getRange(row, map[header]).setValue(values[header]);
+  });
+}
+function recordIssue_(message, institution, reason) {
+  var safe = String(reason || 'Unknown parse failure').replace(/[\r\n]+/g,' ').slice(0,300);
+  var s = getOrCreateSheet_('Import Issues', ISSUE_HEADERS);
+  s.appendRow([message.id, message.receivedAt, institution || '', APP_CONFIG.parserVersion, safe]);
+}
+function setStatus_(key, value) {
+  var s = getOrCreateSheet_('Setup', ['Setting','Value']); var values = s.getDataRange().getValues();
+  for (var i=1;i<values.length;i++) if (values[i][0] === key) { s.getRange(i+1,2).setValue(value); return; }
+  s.appendRow([key,value]);
+}
+
+// ===== appsscript/GmailIntake.gs =====
+function isTrustedSender_(sender) { return Object.prototype.hasOwnProperty.call(APP_CONFIG.trustedSenders, normalizeSender_(sender)); }
+function ensureLabels_() {
+  Object.keys(APP_CONFIG.labels).forEach(function(k){ GmailApp.getUserLabelByName(APP_CONFIG.labels[k]) || GmailApp.createLabel(APP_CONFIG.labels[k]); });
+}
+function buildGmailQuery_() {
+  var senders = Object.keys(APP_CONFIG.trustedSenders).map(function(s){return 'from:'+s;}).join(' OR ');
+  var query = 'newer_than:30d ('+senders+') -label:"'+APP_CONFIG.labels.imported+'" -label:"'+APP_CONFIG.labels.ignored+'" -label:"'+APP_CONFIG.labels.review+'"';
+  var source = PropertiesService.getUserProperties().getProperty('SOURCE_LABEL');
+  return source ? query+' label:"'+source.replace(/"/g,'')+'"' : query;
+}
+function fingerprint_(tx) { return [tx.institution,tx.transactionDate,tx.last4,tx.amount,String(tx.merchant).toUpperCase()].join('|'); }
+function messageModel_(message) { return { id:message.getId(), receivedAt:message.getDate().toISOString() }; }
+function importTransactionAlerts() {
+  var lock = LockService.getScriptLock(); if (!lock.tryLock(1000)) return;
+  var counts={imported:0,ignored:0,review:0};
+  try {
+    initializeWorkbook(); var labels={}; Object.keys(APP_CONFIG.labels).forEach(function(k){labels[k]=GmailApp.getUserLabelByName(APP_CONFIG.labels[k]);});
+    GmailApp.search(buildGmailQuery_(),0,50).forEach(function(thread){ thread.getMessages().forEach(function(msg){
+      var sender=normalizeSender_(msg.getFrom()); if (!isTrustedSender_(sender)) return;
+      var model=messageModel_(msg); if (hasMessageId_(model.id)) { thread.addLabel(labels.imported); return; }
+      try {
+        var parsed=parseAlert(sender,msg.getSubject(),msg.getBody(),msg.getPlainBody());
+        if(parsed.outcome==='imported'){ appendTransaction_(parsed.transaction,model,fingerprint_(parsed.transaction)); thread.addLabel(labels.imported); counts.imported++; setStatus_('Last Imported Transaction',parsed.transaction.transactionDate+' '+parsed.transaction.merchant); }
+        else if(parsed.outcome==='ignored'){ thread.addLabel(labels.ignored); counts.ignored++; }
+        else { recordIssue_(model,parsed.institution || APP_CONFIG.trustedSenders[sender],parsed.reason); thread.addLabel(labels.review); counts.review++; }
+      } catch(e) { setStatus_('Last Error','Retryable error: '+String(e.message||e).slice(0,200)); }
+    }); });
+    setStatus_('Last Checked',new Date()); setStatus_('Last Result',JSON.stringify(counts));
+  } finally { lock.releaseLock(); }
+}
+function importNow(){ importTransactionAlerts(); }
+
+// ===== appsscript/Triggers.gs =====
+function validateInterval_(minutes) {
+  var n=Number(minutes); if(APP_CONFIG.supportedIntervals.indexOf(n)<0) throw new Error('Interval must be 1, 5, 10, 15, 30, or 60 minutes'); return n;
+}
+function removeIntakeTriggers_(){ ScriptApp.getProjectTriggers().forEach(function(t){if(t.getHandlerFunction()==='importTransactionAlerts') ScriptApp.deleteTrigger(t);}); }
+function installSchedule(minutes){ var n=validateInterval_(minutes); removeIntakeTriggers_(); ScriptApp.newTrigger('importTransactionAlerts').timeBased().everyMinutes(n).create(); PropertiesService.getUserProperties().setProperty('POLL_MINUTES',String(n)); setStatus_('Automatic Import','Every '+n+' minute(s)'); }
+function disableAutomaticImport(){ removeIntakeTriggers_(); PropertiesService.getUserProperties().deleteProperty('POLL_MINUTES'); setStatus_('Automatic Import','Disabled'); }
+function schedule1(){installSchedule(1);} function schedule5(){installSchedule(5);} function schedule10(){installSchedule(10);} function schedule15(){installSchedule(15);} function schedule30(){installSchedule(30);} function schedule60(){installSchedule(60);}
+
+// ===== appsscript/Menu.gs =====
+function onOpen(){
+  SpreadsheetApp.getUi().createMenu('Transaction Alerts')
+    .addItem('Setup / Initialize','initializeWorkbook').addItem('Import Now','importNow')
+    .addSubMenu(SpreadsheetApp.getUi().createMenu('Automatic Import').addItem('Every minute','schedule1').addItem('Every 5 minutes','schedule5').addItem('Every 10 minutes','schedule10').addItem('Every 15 minutes','schedule15').addItem('Every 30 minutes','schedule30').addItem('Every hour','schedule60'))
+    .addItem('Disable Automatic Import','disableAutomaticImport').addSeparator()
+    .addItem('Reprocess Selected Issue','reprocessSelectedIssue').addItem('Diagnostics','showDiagnostics').addToUi();
+}
+function reprocessSelectedIssue(){
+  var s=SpreadsheetApp.getActiveSheet(); if(s.getName()!=='Import Issues'||s.getActiveRange().getRow()<2) throw new Error('Select an Import Issues row first.');
+  var row=s.getActiveRange().getRow(), id=String(s.getRange(row,1).getValue()), msg=GmailApp.getMessageById(id); if(!msg||!isTrustedSender_(msg.getFrom())) throw new Error('Trusted source message was not found.');
+  var label=GmailApp.getUserLabelByName(APP_CONFIG.labels.review); msg.getThread().removeLabel(label); s.deleteRow(row); importTransactionAlerts();
+}
+function showDiagnostics(){
+  ensureLabels_(); var triggerCount=ScriptApp.getProjectTriggers().filter(function(t){return t.getHandlerFunction()==='importTransactionAlerts';}).length;
+  SpreadsheetApp.getUi().alert('Transaction Alerts','Sheets ready: '+Boolean(SpreadsheetApp.getActive().getSheetByName('Transactions'))+'\nImport triggers: '+triggerCount+'\nParser: '+APP_CONFIG.parserVersion,SpreadsheetApp.getUi().ButtonSet.OK);
+}

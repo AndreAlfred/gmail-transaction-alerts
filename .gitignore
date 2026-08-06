@@ -1,0 +1,11 @@
+# Never commit real bank alert emails or exported spreadsheet data.
+# Fixtures must be synthetic/redacted — see AGENT_HANDOFF.md.
+*.eml
+*.msg
+*.csv
+*.xlsx
+*.tsv
+
+node_modules/
+.DS_Store
+.clasp.json
