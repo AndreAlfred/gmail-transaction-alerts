@@ -6,7 +6,7 @@ Workflows for this repository live under [`workflows/`](workflows/).
 |---|---|---|---|
 | [`ci.yml`](workflows/ci.yml) | `tests` | **Yes** | `node --test tests/*.test.js` |
 | [`version-check.yml`](workflows/version-check.yml) | `version-check` | **Yes** | Require `.gs` and `.txt` **byte-identical**; require `parserVersion` bump when those files change |
-| [`release.yml`](workflows/release.yml) | `release` | No | Tag `{parserVersion}` (no `v` prefix) and create a GitHub Release on push to `main` |
+| [`release.yml`](workflows/release.yml) | `release` | No | Tag `{parserVersion}` (no `v` prefix) and create a GitHub Release on merged PR to `main`, push to `main`, or manual `workflow_dispatch` |
 
 Helper script: [`scripts/extract-parser-version.js`](scripts/extract-parser-version.js).
 
