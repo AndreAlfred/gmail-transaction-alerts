@@ -16,6 +16,14 @@ This is a living file. Add to it when a bug or review turns up something that wa
 
 **How to apply.** Anchor appends to a column that *only the script writes* — here, `Gmail Message ID` — and scan it bottom-up (`lastScriptRow_`). Never use `getLastRow()` as an append anchor on a sheet a user can edit. The same caution applies to `getDataRange()` and `appendRow()`, which have the same whole-sheet notion of "last".
 
+### An append anchor must recognize rows the *user* wrote, not just rows the script wrote
+
+**What happened.** The first fix for the anchor bug above scanned the `Gmail Message ID` column, on the reasoning that only the script writes it. That is true, and it is exactly why it was wrong. A row the user types by hand — a cash purchase — has no message ID, so the scan looked straight past it, the anchor landed on the row above, and the next import overwrote the user's row cell by cell. The first bug appended where nobody would look; this one destroyed data outright.
+
+**Why it matters.** "Only the script writes this column" is a good property for *deduplication* and a bad one for *occupancy*. The two questions look similar and are not: "have I seen this message?" versus "is this row in use?" A single column answered the first correctly and the second wrongly.
+
+**How to apply.** Ask what makes a row **occupied**, not what makes it *yours*. `lastUsedScriptRow_` checks every script-owned column, so a manual row that fills Transaction Date / Merchant / Amount registers as occupied. In general, when a user shares a data structure with a program, the program's notion of "used" has to include entries the user created — otherwise the program's first act is to destroy them.
+
 ### Hidden columns make "add a column to the right" ambiguous
 
 **What happened.** Columns I–M are hidden audit fields. To the user, column H (`Amount`) looks like the last column, so "I added columns to the right of the data" actually meant *inserted into the middle of the script's block*, silently shifting every hard-coded index. This is also why one added column worked and a later one didn't — the outcome depends entirely on where the insert landed.

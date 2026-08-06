@@ -41,7 +41,9 @@ Parser Version, Fingerprint
 
 The last five are hidden audit columns. If one is missing, the import stops with an error naming it instead of writing to the wrong place.
 
-Two details that make this safe: the append row is located by scanning the *Gmail Message ID* column rather than `getLastRow()` (so formulas filled far down the sheet don't push new rows below the data), and rows are written cell-by-cell into mapped columns (so neighboring formulas are never overwritten).
+Two details that make this safe: the append row is located by scanning every script-owned column for the last row in use, rather than `getLastRow()` (so formulas filled far down the sheet don't push new rows below the data), and rows are written cell-by-cell into mapped columns (so neighboring formulas are never overwritten).
+
+**You can also type rows by hand** — a cash purchase, say. Fill in Transaction Date, Merchant, Amount, and whatever else is useful; leave the hidden audit columns blank. The importer treats a manual row as occupied and appends below it, and dedup ignores it (there's no message ID to match).
 
 ## Tests
 
