@@ -194,14 +194,28 @@ function getColumnMap_(sheet, headers) {
   return map;
 }
 
-// The last row the SCRIPT wrote. Deliberately ignores getLastRow(), which counts
-// user formulas filled down the sheet and would push appends far below the data.
-function lastScriptRow_(sheet, map) {
+// The last row in use in any SCRIPT-OWNED column, which is the append anchor.
+//
+// Two failure modes this deliberately avoids:
+//   1. getLastRow() counts user columns, so a formula filled to row 500 would
+//      push new transactions to row 501, far below the visible data.
+//   2. Scanning only 'Gmail Message ID' would skip rows the user typed by hand
+//      (a cash purchase has no message ID), and the next import would overwrite
+//      them. Manual rows fill Transaction Date / Merchant / Amount, which ARE
+//      script-owned, so checking every owned column sees them.
+function lastUsedScriptRow_(sheet, map) {
   var maxRows = sheet.getMaxRows();
   if (maxRows < 2) return 1;
-  var ids = sheet.getRange(2, map['Gmail Message ID'], maxRows - 1, 1).getValues();
-  for (var i = ids.length - 1; i >= 0; i--) {
-    if (String(ids[i][0]).trim() !== '') return i + 2;
+  var owned = TRANSACTION_HEADERS.map(function (h) { return map[h]; });
+  var minCol = Math.min.apply(null, owned);
+  var maxCol = Math.max.apply(null, owned);
+  // One read across the owned span; user columns inside it are simply not inspected.
+  var values = sheet.getRange(2, minCol, maxRows - 1, maxCol - minCol + 1).getValues();
+  var offsets = owned.map(function (c) { return c - minCol; });
+  for (var i = values.length - 1; i >= 0; i--) {
+    for (var j = 0; j < offsets.length; j++) {
+      if (String(values[i][offsets[j]]).trim() !== '') return i + 2;
+    }
   }
   return 1;
 }
@@ -243,7 +257,7 @@ function hasMessageId_(id) {
   var s = SpreadsheetApp.getActive().getSheetByName('Transactions');
   if (!s || s.getMaxRows() < 2) return false;
   var map = getColumnMap_(s, TRANSACTION_HEADERS);
-  var last = lastScriptRow_(s, map);
+  var last = lastUsedScriptRow_(s, map);
   if (last < 2) return false;
   return s.getRange(2, map['Gmail Message ID'], last - 1, 1).getValues()
     .some(function (r) { return String(r[0]) === String(id); });
@@ -251,7 +265,7 @@ function hasMessageId_(id) {
 function appendTransaction_(tx, message, fingerprint) {
   var s = getOrCreateSheet_('Transactions', TRANSACTION_HEADERS);
   var map = getColumnMap_(s, TRANSACTION_HEADERS);
-  var row = lastScriptRow_(s, map) + 1;
+  var row = lastUsedScriptRow_(s, map) + 1;
   if (row > s.getMaxRows()) s.insertRowsAfter(s.getMaxRows(), 1);
   var values = transactionValues_(tx, message, fingerprint);
   // Written cell-by-cell so user columns between/around them keep their formulas.

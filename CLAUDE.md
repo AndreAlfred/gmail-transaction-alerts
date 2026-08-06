@@ -74,9 +74,17 @@ Hidden audit columns contain Gmail message ID, email received time, event type, 
 End users may add their own columns (categorization, formulas) anywhere on the Transactions sheet. The script tolerates this as of the column-mapping fix:
 
 - Columns are resolved **by header name**, never by fixed index. Row 1 header text for the thirteen script-owned columns must be preserved exactly; if any is missing the script throws a named error instead of writing to the wrong place.
-- The append row is found by scanning the **Gmail Message ID** column, not `getLastRow()`. A user formula filled down to row 500 no longer pushes new transactions to row 501.
+- The append row is found by scanning **every script-owned column** for the last row in use (`lastUsedScriptRow_`), not `getLastRow()`. A user formula filled down to row 500 no longer pushes new transactions to row 501.
 - Rows are written **cell by cell** into mapped columns, so user formulas in surrounding columns are never overwritten.
 - Audit columns are hidden only when the sheet is first created, so a user who unhides them keeps them visible.
+
+### Manually entered rows
+
+Users may type rows directly onto the Transactions sheet — a cash purchase, for example. Such a row has no Gmail Message ID and no audit fields, but it does fill Transaction Date / Merchant / Amount, which **are** script-owned columns. `lastUsedScriptRow_` inspects every owned column precisely so a manual row counts as occupied and the next import lands below it.
+
+Do not narrow that scan back to the `Gmail Message ID` column alone. That makes manual rows invisible to the anchor, and the next import silently overwrites the user's typed data. `tests/sheet-append.test.js` asserts this.
+
+Manual rows are also skipped by dedup (no message ID to match) and by `Event Type`, so they coexist with imported rows without special handling.
 
 Regression to watch for: any change that reintroduces a literal column index (`getRange(row, 9, …)`, a fixed-width `setValues`, or `getLastRow()` as an append anchor) will silently break these guarantees.
 
