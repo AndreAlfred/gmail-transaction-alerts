@@ -1,0 +1,161 @@
+# Agent Handoff: Gmail Transaction Alerts → Google Sheets
+
+## What this project is
+
+This is a minimal, self-contained Google Apps Script product that populates a Google Sheet from bank transaction-alert emails in Gmail. It is intended for two users, each with a completely private copy of the spreadsheet and script.
+
+The active implementation deliberately avoids SimpleFIN, Plaid, external servers, AI, bank credentials, categorization, dashboards, and other budgeting features. Its purpose is narrowly defined: **detect a supported transaction-alert email, extract its transaction fields, and append one row to Google Sheets.**
+
+## Current product behavior
+
+The script searches Gmail for messages from these exact trusted senders:
+
+- USAA: `USAA.customer.service@omem.usaa.com`
+- Chase: `no.reply.alerts@chase.com`
+
+Current parser coverage:
+
+1. **USAA purchase authorizations** matching wording like:
+   `Your credit card ...7484 was charged $7.56 at MERCHANT.`
+   followed by Date and Cardholder name fields.
+2. **Chase merchant purchases**, e.g. subject `You made a $12.34 transaction with SAMPLE*COFFEE SHOP`. Chase renders each field as a two-cell HTML table row (`<td>Merchant</td><td>…</td>`); `htmlToText_` converts each `</tr>` to a newline, so every field lands on its own line as `Label Value`. Merchant and amount fall back to the subject line if the body layout changes. **Chase alerts carry no cardholder name**, so that column is left empty rather than fabricated.
+3. **Chase scheduled credit-card payments**, which are recognized but intentionally ignored because they are not merchant purchases.
+4. Other trusted-sender formats are sent to **Import Issues** and labeled **Needs Review** rather than silently discarded.
+
+The Transactions sheet contains:
+
+- Imported At
+- Transaction Date
+- Institution
+- Card Type
+- Last 4
+- Cardholder
+- Merchant
+- Amount
+
+Hidden audit columns contain Gmail message ID, email received time, event type, parser version, and transaction fingerprint.
+
+### User-added columns
+
+End users may add their own columns (categorization, formulas) anywhere on the Transactions sheet. The script tolerates this as of the column-mapping fix:
+
+- Columns are resolved **by header name**, never by fixed index. Row 1 header text for the thirteen script-owned columns must be preserved exactly; if any is missing the script throws a named error instead of writing to the wrong place.
+- The append row is found by scanning the **Gmail Message ID** column, not `getLastRow()`. A user formula filled down to row 500 no longer pushes new transactions to row 501.
+- Rows are written **cell by cell** into mapped columns, so user formulas in surrounding columns are never overwritten.
+- Audit columns are hidden only when the sheet is first created, so a user who unhides them keeps them visible.
+
+Regression to watch for: any change that reintroduces a literal column index (`getRange(row, 9, …)`, a fixed-width `setValues`, or `getLastRow()` as an append anchor) will silently break these guarantees.
+
+## Architecture
+
+The repository uses focused Apps Script modules:
+
+- `appsscript/Config.gs` — trusted senders, labels, parser version, schedules
+- `appsscript/Text.gs` — email HTML/text normalization
+- `appsscript/Parsers.gs` — sender routing and bank-specific parsing
+- `appsscript/Workbook.gs` — sheet initialization, rows, issues, status
+- `appsscript/GmailIntake.gs` — Gmail search, allowlist, labels, locking, deduplication
+- `appsscript/Triggers.gs` — 1/5/10/15/30/60-minute trigger controls
+- `appsscript/Menu.gs` — spreadsheet menu and user commands
+- `appsscript/appsscript.json` — Apps Script manifest and OAuth scopes
+
+For quick manual installation, all `.gs` modules are also concatenated into:
+
+- `/var/minis/workspace/gmail-transaction-alerts-Code.gs`
+
+The modular files are authoritative for development. Regenerate the bundle after revisions.
+
+## Gmail disposition labels
+
+The script creates and uses:
+
+- `Bank Transactions/Imported`
+- `Bank Transactions/Ignored`
+- `Bank Transactions/Needs Review`
+
+A valid purchase is appended before its message/thread is labeled Imported. Runtime failures remain without a terminal label so they can be retried. Gmail message ID is the primary deduplication key.
+
+## Scheduling and latency
+
+Apps Script has no native Gmail-arrival trigger. The implementation polls using a time-driven trigger. It supports 1, 5, 10, 15, 30, or 60 minutes plus manual **Import Now**.
+
+- Five minutes is the recommended default.
+- One minute is the closest free near-real-time mode.
+- Exact execution time is not guaranteed by Google.
+
+## Privacy and safety constraints
+
+Preserve these boundaries when revising:
+
+- Enforce the exact trusted-sender allowlist even when a Gmail source label is configured.
+- Never store complete email bodies in the spreadsheet or logs.
+- Never commit live message IDs, credentials, personal names, original emails, or real full card numbers.
+- Do not label a message Imported until its row append succeeds.
+- Do not fabricate missing parser fields; send incomplete/unknown formats to review.
+- Treat this as an authorization-alert log, not an authoritative posted bank ledger. Tips, reversals, refunds, and final posted amounts can differ.
+- Keep each end user’s workbook, authorization, labels, triggers, and data independent.
+
+## How to modify parsers
+
+Parser changes should be fixture-driven and test-first:
+
+1. Obtain a real email’s plain-text body or **Show original** source.
+2. Redact personal data while preserving labels, wording, whitespace structure, and representative fictitious values.
+3. Save the synthetic/redacted fixture under `fixtures/`.
+4. Add a failing test in `tests/parser.test.js`.
+5. Run `npm test` and confirm the expected failure.
+6. Modify only the relevant parser in `appsscript/Parsers.gs` where practical.
+7. Run the full test suite and confirm all tests pass.
+8. Regenerate the bundled `gmail-transaction-alerts-Code.gs` file.
+9. Test against the real Gmail message in a disposable private spreadsheet.
+
+Do not loosen sender checks or write one broad regex that mixes banks and message types.
+
+## Current verification status
+
+Local synthetic tests cover:
+
+- USAA purchase extraction
+- Chase scheduled-payment exclusion
+- unknown Chase review routing
+- transaction-row column order
+- exact trusted-sender matching
+- allowed polling intervals
+
+Plus, in `tests/chase-purchase.test.js` against `fixtures/chase-purchase-alert.html`:
+
+- Chase merchant-purchase extraction from the alert body
+- subject-line fallback for merchant and amount
+- Chase purchase with no recoverable date routed to review
+- scheduled payment still ignored, not imported
+- purchase-shaped alert from a lookalike sender rejected
+- month-name date parsing across abbreviations
+
+At the latest verified state, the Chase suite reports **6 passed, 0 failed**. The pre-existing suite has not been re-run since the column-mapping change — its transaction-row column-order test asserts against the old fixed-index write path and may need updating.
+
+The code has not yet completed a real Google Apps Script smoke test. Remaining verification:
+
+1. Install in a bound Apps Script project.
+2. Run `initializeWorkbook()` twice and confirm idempotence.
+3. Run Import Now against the real USAA alert.
+4. Confirm exactly one row and the Imported label.
+5. Run again and confirm no duplicate.
+6. Confirm the supplied Chase payment receives Ignored and no transaction row.
+7. Install, replace, and disable time triggers.
+8. Confirm no full email content or credentials appear in Setup or Import Issues.
+
+## Repository state
+
+- Repository: `/var/minis/workspace/simplefin-sheets`
+- Active worktree: `/var/minis/workspace/simplefin-sheets/.worktrees/gmail-alert-intake`
+- Branch: `feature/gmail-alert-intake`
+- Latest implementation commit at handoff: `04f7d25`
+- Approved design: `docs/superpowers/specs/2026-08-01-gmail-transaction-alerts-design.md`
+- Implementation plan: `docs/superpowers/plans/2026-08-01-gmail-transaction-alerts.md`
+- Archived SimpleFIN draft: `docs/superpowers/specs/2026-08-01-simplefin-sheets-design.md`
+
+## Scope guidance
+
+Optimize for a working, understandable product quickly. Avoid reintroducing categories, budgets, dashboards, transfer matching, AI, or financial aggregation unless the end user explicitly asks for a new scope.
+
+The Chase merchant-purchase parser is now implemented. Note that end users are doing their own categorization in extra columns on the Transactions sheet — support that by keeping the sheet write path column-name-driven, rather than by building categorization into the product.
