@@ -187,6 +187,9 @@ Plus, in `tests/venmo.test.js` against `fixtures/venmo-payment-alert.html` and `
 - Venmo income (paid you) extraction
 - subject-line fallback for counterparty and amount
 - Venmo alert with no date routed to review
+- Venmo whitespace-only plain body falls back to HTML
+- Venmo prefers HTML over flattened non-empty plain
+- Venmo Date match when not at line start
 - Venmo-shaped alert from a lookalike sender rejected
 - unknown Venmo format from the trusted sender routed to review
 
