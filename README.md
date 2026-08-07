@@ -22,6 +22,8 @@ Anything else from a trusted sender is routed to an **Import Issues** sheet and 
 4. **Transaction Alerts → Setup / Initialize** (authorize when prompted).
 5. **Transaction Alerts → Import Now**, then **Automatic Import → Every 5 minutes**.
 
+On the **Setup** sheet, `Import USAA`, `Import Chase`, and `Import Venmo` default to `TRUE`. Set any to `FALSE` to pause that institution without labeling its mail; turning it back on resumes import within the usual 30-day search window.
+
 `gmail-transaction-alerts-Code.txt` is a byte-identical copy of the `.gs`, for devices that won't open a `.gs` file. Regenerate it after any change:
 
 ```bash
