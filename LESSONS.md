@@ -78,6 +78,12 @@ Credit merchant and amount also appear in the subject line; debit amount appears
 
 **How to apply.** For Venmo, prefer subject amount/counterparty regexes (`You paid NAME $X.XX` / `NAME paid you $X.XX`) over reconstructing the split hero. Do not strip `display:none` content globally in `htmlToText_` just to fix this — that would be a cross-parser change for one sender's quirk.
 
+### An empty Venmo `text/plain` part makes `plainBody || html` pick the wrong source
+
+**What happened.** Live Venmo alerts are `multipart/alternative` with a blank text/plain body and all content in HTML. `parseAlert` used `normalizeText_(plainBody || htmlToText_(htmlBody))`. If `getPlainBody()` returned whitespace (truthy) or a flattened Gmail-synthesized plain string without a line-leading `Date`, the HTML was skipped or the Date regex missed, and a perfectly good payment went to Needs Review while subject parsing would have been fine.
+
+**How to apply.** Normalize plain first and fall back to HTML only when plain is empty after normalize. For Venmo, prefer the HTML-derived text whenever it is present. Do not require `Date` at line start in the Venmo parser.
+
 ### Never widen the sender allowlist to make a parser work
 
 The allowlist is a security boundary, not a convenience. A lookalike sender (`alerts@chase.com.example.net`) must be rejected even when the message body parses perfectly — there is a test asserting exactly this. If a legitimate email is being rejected, fix the sender entry, don't loosen the match.

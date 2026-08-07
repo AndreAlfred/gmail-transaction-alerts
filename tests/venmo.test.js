@@ -105,6 +105,33 @@ test('Venmo alert with no recoverable date goes to review', () => {
   assert.strictEqual(result.institution, 'Venmo');
 });
 
+test('Venmo falls back to HTML when plain body is whitespace-only', () => {
+  // Live Venmo MIME has an empty text/plain part; GmailApp.getPlainBody() can
+  // return newlines that are truthy under `plain || html` but empty after normalize.
+  const result = parseAlert(VENMO_SENDER, PAYMENT_SUBJECT, PAYMENT_HTML, '\n\n  \n');
+  assert.strictEqual(result.outcome, 'imported');
+  assert.strictEqual(result.transaction.merchant, 'Alex Sample');
+  assert.strictEqual(result.transaction.amount, 12.34);
+  assert.strictEqual(result.transaction.transactionDate, '2026-06-05');
+});
+
+test('Venmo prefers HTML over flattened non-empty plain text', () => {
+  // Synthesized plain that lacks a usable Date should not beat the HTML body.
+  const flatPlain = 'You paid Alex Sample See transaction Transaction details';
+  const result = parseAlert(VENMO_SENDER, PAYMENT_SUBJECT, PAYMENT_HTML, flatPlain);
+  assert.strictEqual(result.outcome, 'imported');
+  assert.strictEqual(result.transaction.transactionDate, '2026-06-05');
+  assert.strictEqual(result.transaction.last4, '4321');
+});
+
+test('Venmo finds Date when it is not at line start', () => {
+  const plain = 'Transaction details Date Jun 05, 2026 Status Completed';
+  const result = parseAlert(VENMO_SENDER, PAYMENT_SUBJECT, '', plain);
+  assert.strictEqual(result.outcome, 'imported');
+  assert.strictEqual(result.transaction.transactionDate, '2026-06-05');
+  assert.strictEqual(result.transaction.merchant, 'Alex Sample');
+});
+
 test('a Venmo-shaped alert from an untrusted sender is rejected', () => {
   const result = parseAlert('alerts@venmo.com.example.net', PAYMENT_SUBJECT, PAYMENT_HTML, '');
   assert.strictEqual(result.outcome, 'needs_review');
