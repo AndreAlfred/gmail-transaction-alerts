@@ -21,17 +21,20 @@
  *   import stops with an error naming it instead of writing to the wrong place.)
  *
  * NOTES
- *   Chase alerts do not include a cardholder name, so that cell is blank on
- *   Chase rows. This is an authorization-alert log, not a posted bank ledger:
- *   tips, refunds, and final posted amounts can differ.
+ *   Chase and Venmo alerts do not include a cardholder name, so that cell is
+ *   blank on those rows. Venmo amounts are always positive; Event Type is
+ *   venmo_payment (you paid) or venmo_payment_received (someone paid you).
+ *   This is an authorization-alert log, not a posted bank ledger: tips,
+ *   refunds, and final posted amounts can differ.
  */
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.1.0',
+  parserVersion: '1.2.0',
   trustedSenders: Object.freeze({
     'usaa.customer.service@omem.usaa.com': 'USAA',
-    'no.reply.alerts@chase.com': 'Chase'
+    'no.reply.alerts@chase.com': 'Chase',
+    'venmo@venmo.com': 'Venmo'
   }),
   supportedIntervals: Object.freeze([1, 5, 10, 15, 30, 60]),
   labels: Object.freeze({
@@ -115,7 +118,9 @@ function parseAlert(sender, subject, htmlBody, plainBody) {
   if (!institution) return { outcome: 'needs_review', reason: 'Untrusted sender' };
   var text = normalizeText_(plainBody || htmlToText_(htmlBody));
   if (institution === 'USAA') return parseUsaa_(text);
-  return parseChase_(subject, text);
+  if (institution === 'Chase') return parseChase_(subject, text);
+  if (institution === 'Venmo') return parseVenmo_(subject, text);
+  return { outcome: 'needs_review', institution: institution, reason: 'Unsupported institution' };
 }
 
 function parseUsaa_(text) {
@@ -195,6 +200,76 @@ function parseChasePurchase_(subject, text) {
     merchant: String(merchant[1]).trim(),
     amount: parsedAmount,
     eventType: 'purchase_authorization'
+  }};
+}
+
+// Venmo P2P alerts: "You paid NAME $X.XX" (payment) or "NAME paid you $X.XX"
+// (received). The hero amount is split across divs ($ / dollars / hidden "." /
+// cents), so subject is the reliable amount source; body Date + optional
+// "account ending in ####" from Payment Method fill the rest. Merchant is the
+// counterparty. No cardholder is present.
+function parseVenmo_(subject, text) {
+  var subjectLine = String(subject || '');
+  var body = normalizeText_(text);
+
+  var paymentSubject = subjectLine.match(/^You paid\s+(.+?)\s+(\$[\d,]+(?:\.\d{2})?)\s*$/i);
+  var incomeSubject = subjectLine.match(/^(.+?)\s+paid you\s+(\$[\d,]+(?:\.\d{2})?)\s*$/i);
+
+  var isPayment = false;
+  var isReceived = false;
+  var merchant = '';
+  var amountStr = '';
+
+  if (paymentSubject) {
+    isPayment = true;
+    merchant = paymentSubject[1];
+    amountStr = paymentSubject[2];
+  } else if (incomeSubject) {
+    isReceived = true;
+    merchant = incomeSubject[1];
+    amountStr = incomeSubject[2];
+  } else {
+    var youPaid = body.match(/(?:^|\n)\s*You paid\s+([^\n]+?)\s*(?:\n|$)/i);
+    var paidYou = body.match(/(?:^|\n)\s*([^\n]+?)\s+paid you\s*(?:\n|$)/i);
+    if (youPaid) {
+      isPayment = true;
+      merchant = youPaid[1];
+    } else if (paidYou) {
+      isReceived = true;
+      merchant = paidYou[1];
+    }
+  }
+
+  if (!amountStr) {
+    var bodyAmount = body.match(/\$\s*([\d,]+)\s*\.\s*(\d{2})/);
+    if (bodyAmount) amountStr = '$' + bodyAmount[1] + '.' + bodyAmount[2];
+  }
+
+  var date = body.match(/(?:^|\n)\s*Date\b\s*:?\s*([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})/i);
+  var last4Match = body.match(/account ending in\s+(\d{4})/i);
+
+  if (!isPayment && !isReceived) {
+    return { outcome: 'needs_review', institution: 'Venmo', reason: 'Unsupported Venmo alert format' };
+  }
+  if (!merchant || !amountStr || !date) {
+    return { outcome: 'needs_review', institution: 'Venmo', reason: 'Unsupported or incomplete Venmo alert' };
+  }
+
+  var parsedDate = parseMonthNameDate_(date[1]);
+  var parsedAmount = parseAmount_(amountStr);
+  if (!parsedDate || !Number.isFinite(parsedAmount)) {
+    return { outcome: 'needs_review', institution: 'Venmo', reason: 'Invalid Venmo date or amount' };
+  }
+
+  return { outcome: 'imported', transaction: {
+    transactionDate: parsedDate,
+    institution: 'Venmo',
+    cardType: isPayment ? 'payment' : 'received',
+    last4: last4Match ? last4Match[1] : '',
+    cardholder: '',
+    merchant: String(merchant).trim(),
+    amount: parsedAmount,
+    eventType: isPayment ? 'venmo_payment' : 'venmo_payment_received'
   }};
 }
 
