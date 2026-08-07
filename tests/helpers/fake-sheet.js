@@ -6,10 +6,16 @@
  * the real API. Empty cells are '' as they are in Apps Script.
  */
 class FakeSheet {
-  /** @param {Array<Array<*>>} grid Row 1 is the header row. */
-  constructor(grid) {
+  /**
+   * @param {Array<Array<*>>} grid Row 1 is the header row.
+   * @param {string} [name] Sheet name, used in error messages.
+   */
+  constructor(grid, name) {
     this.grid = grid.map((row) => row.slice());
+    this.name = name || 'Transactions';
   }
+
+  getName() { return this.name; }
 
   getMaxRows() { return this.grid.length; }
 

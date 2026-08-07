@@ -12,9 +12,22 @@ Instructions for coding agents working in this repository. Read this before chan
 >
 > Because the two are identical, this file is written to read correctly under either name. Don't add wording that only makes sense in one of them.
 
+## Branching
+
+This repository has more than one contributor. **Do not commit to `main`.**
+
+```bash
+git checkout -b feature/<short-description>
+# work, commit, then:
+git push -u origin feature/<short-description>
+gh pr create --fill
+```
+
+One branch per change, named for what it does. Run the full test suite before pushing, and say in the PR body what you verified and what you did not. If a change alters the shape of a sheet the user already has data in, describe the migration explicitly — someone else's live spreadsheet is downstream of it.
+
 **Quick reference**
 
-- Tests: `node --test tests/chase-purchase.test.js`
+- Tests: `node --test tests/*.test.js` (run them all; several suites exist)
 - Authoritative source: `gmail-transaction-alerts-Code.gs`; regenerate the `.txt` copy after every change (`cp gmail-transaction-alerts-Code.gs gmail-transaction-alerts-Code.txt`)
 - Never commit real alert emails, real merchant/amount pairs, real card digits, live message IDs, or personal names — fixtures must be synthetic
 - Never widen the trusted-sender allowlist to make a parser pass
@@ -93,6 +106,15 @@ Do not narrow that scan back to the `Gmail Message ID` column alone. That makes 
 Manual rows are also skipped by dedup (no message ID to match) and by `Event Type`, so they coexist with imported rows without special handling.
 
 Regression to watch for: any change that reintroduces a literal column index (`getRange(row, 9, …)`, a fixed-width `setValues`, or `getLastRow()` as an append anchor) will silently break these guarantees.
+
+### Import Issues
+
+Rows record `Gmail Message ID`, `Email Received At`, `Institution`, `Subject`, `From`, `Reason`, `Open in Gmail`, and `Parser Version` — enough for a reviewer to judge an alert without opening Gmail.
+
+- **Subject and sender only. Never the body.** Subject lines are short and label the message; bodies are the thing the privacy constraints exist to keep out of the sheet.
+- Text is passed through `safeCellText_`, which collapses newlines, caps length, and prefixes a leading `=`, `+`, `-`, or `@` with an apostrophe so a subject line cannot be evaluated as a formula.
+- `ensureHeaders_` adds any missing header to the right of the existing ones, so sheets created by an earlier version keep their column positions and their old rows stay readable. Never reorder or rewrite existing headers as part of a migration.
+- Issue rows are appended with the same column-map and last-used-row logic as transactions, so a reviewer's own notes columns are safe.
 
 ## Architecture
 

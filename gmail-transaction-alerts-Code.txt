@@ -32,7 +32,7 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.4.0',
+  parserVersion: '1.5.0',
   trustedSenders: Object.freeze({
     'usaa.customer.service@omem.usaa.com': 'USAA',
     'no.reply.alerts@chase.com': 'Chase',
@@ -347,12 +347,27 @@ function parseVenmo_(subject, text) {
 
 // ===== appsscript/Workbook.gs =====
 var TRANSACTION_HEADERS = ['Imported At','Transaction Date','Institution','Card Type','Last 4','Cardholder','Merchant','Amount','Gmail Message ID','Email Received At','Event Type','Parser Version','Fingerprint'];
-var ISSUE_HEADERS = ['Gmail Message ID','Email Received At','Institution','Parser Version','Reason'];
+// 'Subject' and 'From' are recorded so a reviewer can judge an issue without
+// opening Gmail. Subject only -- never the body, per the privacy constraints.
+var ISSUE_HEADERS = ['Gmail Message ID','Email Received At','Institution','Subject','From','Reason','Open in Gmail','Parser Version'];
 
 function getOrCreateSheet_(name, headers) {
   var ss = SpreadsheetApp.getActive(); var sheet = ss.getSheetByName(name) || ss.insertSheet(name);
   if (sheet.getLastRow() === 0) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  else ensureHeaders_(sheet, headers);
   sheet.setFrozenRows(1); return sheet;
+}
+
+// Adds any required header this sheet does not have yet, to the right of the
+// existing ones. Sheets created by an older version keep working: their columns
+// stay put, new ones are appended, and nothing is reordered or overwritten.
+// Returns the number of headers added.
+function ensureHeaders_(sheet, headers) {
+  var width = Math.max(sheet.getLastColumn(), 1);
+  var existing = sheet.getRange(1, 1, 1, width).getValues()[0].map(function (v) { return String(v).trim(); });
+  var missing = headers.filter(function (h) { return existing.indexOf(h) < 0; });
+  missing.forEach(function (header, i) { sheet.getRange(1, width + 1 + i).setValue(header); });
+  return missing.length;
 }
 
 // Resolves each required header to its actual column number, so user-added
@@ -367,7 +382,7 @@ function getColumnMap_(sheet, headers) {
   });
   var missing = headers.filter(function (h) { return !map[h]; });
   if (missing.length) {
-    throw new Error('The Transactions header row is missing required column(s): ' + missing.join(', ') +
+    throw new Error('The ' + sheet.getName() + ' header row is missing required column(s): ' + missing.join(', ') +
       '. Restore the header text exactly, then run Setup / Initialize.');
   }
   return map;
@@ -383,9 +398,14 @@ function getColumnMap_(sheet, headers) {
 //      them. Manual rows fill Transaction Date / Merchant / Amount, which ARE
 //      script-owned, so checking every owned column sees them.
 function lastUsedScriptRow_(sheet, map) {
+  return lastUsedRowIn_(sheet, TRANSACTION_HEADERS, map);
+}
+
+// Generic form of the above, used for any sheet the script appends to.
+function lastUsedRowIn_(sheet, headers, map) {
   var maxRows = sheet.getMaxRows();
   if (maxRows < 2) return 1;
-  var owned = TRANSACTION_HEADERS.map(function (h) { return map[h]; });
+  var owned = headers.map(function (h) { return map[h]; });
   var minCol = Math.min.apply(null, owned);
   var maxCol = Math.max.apply(null, owned);
   // One read across the owned span; user columns inside it are simply not inspected.
@@ -453,10 +473,33 @@ function appendTransaction_(tx, message, fingerprint) {
     s.getRange(row, map[header]).setValue(values[header]);
   });
 }
+// Single-line, length-capped text for a spreadsheet cell. A leading =, +, - or
+// @ is prefixed with an apostrophe so an odd subject line cannot be interpreted
+// as a formula.
+function safeCellText_(value, limit) {
+  var text = String(value == null ? '' : value).replace(/[\r\n\t]+/g, ' ').trim().slice(0, limit || 300);
+  return /^[=+\-@]/.test(text) ? "'" + text : text;
+}
+
 function recordIssue_(message, institution, reason) {
-  var safe = String(reason || 'Unknown parse failure').replace(/[\r\n]+/g,' ').slice(0,300);
   var s = getOrCreateSheet_('Import Issues', ISSUE_HEADERS);
-  s.appendRow([message.id, message.receivedAt, institution || '', APP_CONFIG.parserVersion, safe]);
+  var map = getColumnMap_(s, ISSUE_HEADERS);
+  var row = lastUsedRowIn_(s, ISSUE_HEADERS, map) + 1;
+  if (row > s.getMaxRows()) s.insertRowsAfter(s.getMaxRows(), 1);
+  var values = {
+    'Gmail Message ID': message.id,
+    'Email Received At': message.receivedAt,
+    'Institution': institution || '',
+    // Subject and sender only -- never the body.
+    'Subject': safeCellText_(message.subject, 250),
+    'From': safeCellText_(message.from, 120),
+    'Reason': safeCellText_(reason || 'Unknown parse failure', 300),
+    'Open in Gmail': message.id ? 'https://mail.google.com/mail/u/0/#all/' + message.id : '',
+    'Parser Version': APP_CONFIG.parserVersion
+  };
+  // Cell-by-cell into mapped columns, so notes a reviewer adds in their own
+  // columns are never overwritten.
+  ISSUE_HEADERS.forEach(function (header) { s.getRange(row, map[header]).setValue(values[header]); });
 }
 function setStatus_(key, value) {
   var s = getOrCreateSheet_('Setup', ['Setting','Value']); var values = s.getDataRange().getValues();
@@ -543,7 +586,14 @@ function buildGmailQuery_() {
   return source ? query+' label:"'+source.replace(/"/g,'')+'"' : query;
 }
 function fingerprint_(tx) { return [tx.institution,tx.transactionDate,tx.last4,tx.amount,String(tx.merchant).toUpperCase()].join('|'); }
-function messageModel_(message) { return { id:message.getId(), receivedAt:message.getDate().toISOString() }; }
+function messageModel_(message) {
+  return {
+    id: message.getId(),
+    receivedAt: message.getDate().toISOString(),
+    subject: message.getSubject(),
+    from: normalizeSender_(message.getFrom())
+  };
+}
 function importTransactionAlerts() {
   var lock = LockService.getScriptLock(); if (!lock.tryLock(1000)) return;
   var counts={imported:0,ignored:0,review:0,errors:0};
@@ -596,7 +646,8 @@ function onOpen(){
 }
 function reprocessSelectedIssue(){
   var s=SpreadsheetApp.getActiveSheet(); if(s.getName()!=='Import Issues'||s.getActiveRange().getRow()<2) throw new Error('Select an Import Issues row first.');
-  var row=s.getActiveRange().getRow(), id=String(s.getRange(row,1).getValue()), msg=GmailApp.getMessageById(id); if(!msg||!isTrustedSender_(msg.getFrom())) throw new Error('Trusted source message was not found.');
+  var map=getColumnMap_(s,ISSUE_HEADERS);
+  var row=s.getActiveRange().getRow(), id=String(s.getRange(row,map['Gmail Message ID']).getValue()), msg=GmailApp.getMessageById(id); if(!msg||!isTrustedSender_(msg.getFrom())) throw new Error('Trusted source message was not found.');
   var label=GmailApp.getUserLabelByName(APP_CONFIG.labels.review); msg.getThread().removeLabel(label); s.deleteRow(row); importTransactionAlerts();
 }
 // Jumps the cursor to the last imported row. Rows written by older versions of

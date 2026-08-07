@@ -102,6 +102,14 @@ The allowlist is a security boundary, not a convenience. A lookalike sender (`al
 
 Redaction attention naturally goes to card numbers and names, but `CTLP*CANTEEN VENDING` / `$1.50` is a record of a real person's real purchase, and it had spread into doc prose and code comments — not just the fixture. Before publishing anything, grep for the real merchant string, the real last-4, and the account email across *all* files, including comments and Markdown.
 
+### Adding a column to an existing sheet is a migration, not an edit
+
+`getOrCreateSheet_` only wrote headers when a sheet was empty, so adding fields to `Import Issues` would have left every existing user on the old header row while the code wrote the new, longer value list — silently misaligning every future row against the wrong columns. `ensureHeaders_` appends only the missing headers, to the right, leaving existing positions and rows intact. Any change to a header list has to answer "what happens to a sheet that already has data?" before it lands.
+
+### Untrusted text in a spreadsheet cell is a formula injection vector
+
+A cell whose value begins with `=`, `+`, `-`, or `@` is evaluated by Sheets. Email subject lines come from outside the system, so they go through `safeCellText_`, which prefixes those with an apostrophe. The same applies to any future field sourced from message content.
+
 ### Fixtures must preserve structure, not content
 
 A redacted fixture is only useful if it still exercises the real parsing path. Keep the tag nesting, field labels, whitespace, and quirks (including the unclosed `<a>` tag in Chase's date cell); replace only the values, with obviously fictitious ones.
