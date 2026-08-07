@@ -68,6 +68,12 @@ The alternative — regexing across the raw blob — would match the wrong thing
 
 **How to apply.** Treat Chase credit and debit as two label dialects of one layout. Accept both label sets in `parseChasePurchase_`; do not assume "Merchant" or "Date" will appear. Debit account rows carry only `(...last4)`, so Card Type is `debit` from the alert wording — do not invent a product name.
 
+### Chase transfer alerts are a third label dialect
+
+**What happened.** Credit and debit purchase parsing still sent outbound transfers (`You sent $… to …`) to Needs Review. Those alerts reuse the nested two-cell layout but use Sent on / Recipient, a Transfer alert badge, and no Merchant or Description row.
+
+**How to apply.** Detect transfer-shaped Chase mail (`You sent $…` or `Transfer alert`) and parse it in `parseChaseTransferOut_` — do not widen purchase regexes to accept Recipient/Sent on. Card Type is `transfer`; Event Type is `transfer_out`; Merchant is the recipient. Amount stays positive.
+
 ### Prefer a fallback source over a failed parse, but never invent a value
 
 Credit merchant and amount also appear in the subject line; debit amount appears in the subject and merchant in the body headline. Falling back to those is recovering a value from a second real source — not the same as fabricating one. Chase alerts genuinely contain no cardholder name, so that field is left empty. Missing data goes to Needs Review or stays blank; it never gets guessed.

@@ -9,7 +9,7 @@ It deliberately does one thing: **detect a supported transaction-alert email, ex
 | Institution | Sender | Handling |
 |---|---|---|
 | USAA | `USAA.customer.service@omem.usaa.com` | Purchase authorizations imported |
-| Chase | `no.reply.alerts@chase.com` | Credit and debit merchant purchases imported; scheduled card payments ignored |
+| Chase | `no.reply.alerts@chase.com` | Credit and debit merchant purchases and outbound transfers imported; scheduled card payments ignored |
 | Venmo | `venmo@venmo.com` | P2P payments you sent and payments you received imported; other Venmo mail goes to Needs Review |
 
 Anything else from a trusted sender is routed to an **Import Issues** sheet and labeled **Needs Review** rather than silently dropped. Mail from any other sender is rejected outright.
@@ -94,6 +94,7 @@ Exact check names must match the workflow job `name:` fields above. If a check i
 
 - This is an **authorization-alert log, not a posted bank ledger.** Tips, refunds, reversals, and final posted amounts can differ from the alert.
 - Chase and Venmo alerts contain no cardholder name, so that column is blank on those rows. It is left empty rather than inferred.
+- Chase outbound transfers use **Card Type** `transfer` and **Event Type** `transfer_out`; **Merchant** is the recipient. Amount is positive.
 - Venmo amounts are always positive. **Event Type** is `venmo_payment` (you paid) or `venmo_payment_received` (someone paid you); **Card Type** is `payment` or `received`. **Merchant** is the counterparty name.
 - Only alerts that arrive as email are captured. If an alert doesn't fire, there's no row.
 
