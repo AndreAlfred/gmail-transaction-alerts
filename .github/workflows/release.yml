@@ -75,6 +75,9 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
           TAG: ${{ steps.ver.outputs.tag }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -91,20 +94,44 @@ jobs:
             "### Changes" \
             "")
 
-          # Write notes file: preamble + GitHub-generated notes
           NOTES_FILE=$(mktemp)
           printf '%s\n' "$PREAMBLE" > "$NOTES_FILE"
 
-          # generate_release_notes via API, then create release with combined body
-          GEN=$(gh api \
-            --method POST \
-            -H "Accept: application/vnd.github+json" \
-            "/repos/${{ github.repository }}/releases/generate-notes" \
-            -f tag_name="$TAG" \
-            -f target_commitish="$TARGET_SHA" \
-            --jq .body)
+          # Prefer the merged PR description; fall back to GitHub-generated notes.
+          CHANGES=""
+          if [ "$EVENT_NAME" = "pull_request" ] && [ -n "${PR_BODY//[[:space:]]/}" ]; then
+            CHANGES="$PR_BODY"
+            echo "Using PR #${PR_NUMBER} description for release notes."
+          else
+            # push / workflow_dispatch: find a PR that introduced this commit
+            FOUND_PR=$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${{ github.repository }}/commits/${TARGET_SHA}/pulls" \
+              --jq '.[0].number // empty' 2>/dev/null || true)
+            if [ -n "$FOUND_PR" ]; then
+              FOUND_BODY=$(gh api \
+                -H "Accept: application/vnd.github+json" \
+                "/repos/${{ github.repository }}/pulls/${FOUND_PR}" \
+                --jq '.body // empty')
+              if [ -n "${FOUND_BODY//[[:space:]]/}" ]; then
+                CHANGES="$FOUND_BODY"
+                echo "Using PR #${FOUND_PR} description for release notes."
+              fi
+            fi
+          fi
 
-          printf '%s\n' "$GEN" >> "$NOTES_FILE"
+          if [ -z "$CHANGES" ]; then
+            echo "No PR description found; using GitHub-generated notes."
+            CHANGES=$(gh api \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${{ github.repository }}/releases/generate-notes" \
+              -f tag_name="$TAG" \
+              -f target_commitish="$TARGET_SHA" \
+              --jq .body)
+          fi
+
+          printf '%s\n' "$CHANGES" >> "$NOTES_FILE"
 
           gh release create "$TAG" \
             --title "$TAG" \
