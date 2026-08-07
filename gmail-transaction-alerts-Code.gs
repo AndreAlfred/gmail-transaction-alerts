@@ -32,11 +32,18 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.3.0',
+  parserVersion: '1.4.0',
   trustedSenders: Object.freeze({
     'usaa.customer.service@omem.usaa.com': 'USAA',
     'no.reply.alerts@chase.com': 'Chase',
     'venmo@venmo.com': 'Venmo'
+  }),
+  // Setup sheet rows that gate which institutions are searched. Seeded as TRUE
+  // once; initialize never overwrites an existing Value.
+  importToggles: Object.freeze({
+    'Import USAA': 'USAA',
+    'Import Chase': 'Chase',
+    'Import Venmo': 'Venmo'
   }),
   supportedIntervals: Object.freeze([1, 5, 10, 15, 30, 60]),
   labels: Object.freeze({
@@ -406,6 +413,7 @@ function initializeWorkbook() {
       .forEach(function (h) { tx.hideColumns(map[h], 1); });
   }
   getOrCreateSheet_('Setup', ['Setting','Value']); getOrCreateSheet_('Import Issues', ISSUE_HEADERS);
+  ensureImportToggles_();
   ensureLabels_(); setStatus_('Initialized', new Date());
 }
 function transactionValues_(tx, message, fingerprint) {
@@ -456,13 +464,80 @@ function setStatus_(key, value) {
   s.appendRow([key,value]);
 }
 
+// TRUE / true / 1 / boolean true → enabled. Blank and anything else → disabled.
+function isEnabledSetting_(value) {
+  if (value === true || value === 1) return true;
+  var s = String(value == null ? '' : value).trim().toLowerCase();
+  return s === 'true' || s === '1';
+}
+
+// Returns the raw Value for a Setup key, or null if the key row is absent.
+function readSetupSetting_(key) {
+  var s = SpreadsheetApp.getActive().getSheetByName('Setup');
+  if (!s) return null;
+  var values = s.getDataRange().getValues();
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][0]) === key) return values[i][1];
+  }
+  return null;
+}
+
+function importToggleKey_(institution) {
+  var toggles = APP_CONFIG.importToggles;
+  var keys = Object.keys(toggles);
+  for (var i = 0; i < keys.length; i++) {
+    if (toggles[keys[i]] === institution) return keys[i];
+  }
+  return null;
+}
+
+// Missing Setup row → enabled (older sheets before ensureImportToggles_ runs).
+// Present but blank/FALSE → disabled.
+function isInstitutionEnabled_(institution) {
+  var key = importToggleKey_(institution);
+  if (!key) return true;
+  var value = readSetupSetting_(key);
+  if (value === null) return true;
+  return isEnabledSetting_(value);
+}
+
+// Seed Import USAA / Chase / Venmo as TRUE if absent. Never overwrite a Value.
+function ensureImportToggles_() {
+  var s = getOrCreateSheet_('Setup', ['Setting', 'Value']);
+  var values = s.getDataRange().getValues();
+  var existing = {};
+  for (var i = 1; i < values.length; i++) existing[String(values[i][0])] = true;
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['TRUE', 'FALSE'], true)
+    .setAllowInvalid(false)
+    .build();
+  Object.keys(APP_CONFIG.importToggles).forEach(function (key) {
+    if (existing[key]) return;
+    s.appendRow([key, true]);
+    s.getRange(s.getLastRow(), 2).setDataValidation(rule);
+  });
+}
+
+function enabledTrustedSenders_() {
+  var all = APP_CONFIG.trustedSenders;
+  var out = {};
+  Object.keys(all).forEach(function (email) {
+    if (isInstitutionEnabled_(all[email])) out[email] = all[email];
+  });
+  return out;
+}
+
 // ===== appsscript/GmailIntake.gs =====
 function isTrustedSender_(sender) { return trustedInstitution_(sender) !== null; }
 function ensureLabels_() {
   Object.keys(APP_CONFIG.labels).forEach(function(k){ GmailApp.getUserLabelByName(APP_CONFIG.labels[k]) || GmailApp.createLabel(APP_CONFIG.labels[k]); });
 }
 function buildGmailQuery_() {
-  var senders = Object.keys(APP_CONFIG.trustedSenders).map(function(s){return 'from:'+s;}).join(' OR ');
+  var enabled = enabledTrustedSenders_();
+  var emails = Object.keys(enabled);
+  // No enabled institutions: match nothing rather than searching every sender.
+  if (emails.length === 0) return 'label:"__gmail_transaction_alerts_none__"';
+  var senders = emails.map(function(s){return 'from:'+s;}).join(' OR ');
   var query = 'newer_than:30d ('+senders+') -label:"'+APP_CONFIG.labels.imported+'" -label:"'+APP_CONFIG.labels.ignored+'" -label:"'+APP_CONFIG.labels.review+'"';
   var source = PropertiesService.getUserProperties().getProperty('SOURCE_LABEL');
   return source ? query+' label:"'+source.replace(/"/g,'')+'"' : query;
@@ -475,7 +550,11 @@ function importTransactionAlerts() {
   try {
     initializeWorkbook(); var labels={}; Object.keys(APP_CONFIG.labels).forEach(function(k){labels[k]=GmailApp.getUserLabelByName(APP_CONFIG.labels[k]);});
     GmailApp.search(buildGmailQuery_(),0,50).forEach(function(thread){ thread.getMessages().forEach(function(msg){
-      var sender=normalizeSender_(msg.getFrom()); if (!isTrustedSender_(sender)) return;
+      var sender=normalizeSender_(msg.getFrom());
+      var institution=trustedInstitution_(sender);
+      if (!institution) return;
+      // Defense in depth: skip unlabeled if a disabled institution still appears.
+      if (!isInstitutionEnabled_(institution)) return;
       var model=messageModel_(msg); if (hasMessageId_(model.id)) { thread.addLabel(labels.imported); return; }
       try {
         var parsed=parseAlert(sender,msg.getSubject(),msg.getBody(),msg.getPlainBody());
@@ -556,6 +635,10 @@ function showDiagnostics(){
   lines.push('Workbook ID: '+SpreadsheetApp.getActive().getId());
   lines.push('Parser: '+APP_CONFIG.parserVersion);
   lines.push('Import triggers: '+triggerCount);
+  lines.push('Import toggles:');
+  Object.keys(APP_CONFIG.importToggles).forEach(function(k){
+    lines.push('  '+k+': '+(isInstitutionEnabled_(APP_CONFIG.importToggles[k]) ? 'TRUE' : 'FALSE'));
+  });
   lines.push('Trusted senders:');
   Object.keys(APP_CONFIG.trustedSenders).forEach(function(k){ lines.push('  '+k+' -> '+APP_CONFIG.trustedSenders[k]); });
 
