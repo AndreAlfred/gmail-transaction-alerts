@@ -72,6 +72,12 @@ The alternative — regexing across the raw blob — would match the wrong thing
 
 Credit merchant and amount also appear in the subject line; debit amount appears in the subject and merchant in the body headline. Falling back to those is recovering a value from a second real source — not the same as fabricating one. Chase alerts genuinely contain no cardholder name, so that field is left empty. Missing data goes to Needs Review or stays blank; it never gets guessed.
 
+### Venmo splits the dollar amount across separate HTML nodes
+
+**What happened.** Venmo's hero amount is four siblings: `$`, the dollar digits, a `display:none` span holding `.`, and the cents. After `htmlToText_`, that becomes `$ 12 . 34` rather than `$12.34`. The subject line already carries a clean `$12.34`, so subject is the primary amount source and the spaced body form is only a fallback.
+
+**How to apply.** For Venmo, prefer subject amount/counterparty regexes (`You paid NAME $X.XX` / `NAME paid you $X.XX`) over reconstructing the split hero. Do not strip `display:none` content globally in `htmlToText_` just to fix this — that would be a cross-parser change for one sender's quirk.
+
 ### Never widen the sender allowlist to make a parser work
 
 The allowlist is a security boundary, not a convenience. A lookalike sender (`alerts@chase.com.example.net`) must be rejected even when the message body parses perfectly — there is a test asserting exactly this. If a legitimate email is being rejected, fix the sender entry, don't loosen the match.
