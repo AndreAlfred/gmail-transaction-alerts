@@ -30,7 +30,7 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.2.0',
+  parserVersion: '1.2.1',
   trustedSenders: Object.freeze({
     'usaa.customer.service@omem.usaa.com': 'USAA',
     'no.reply.alerts@chase.com': 'Chase',
@@ -116,7 +116,15 @@ function trustedInstitution_(sender) {
 function parseAlert(sender, subject, htmlBody, plainBody) {
   var institution = trustedInstitution_(sender);
   if (!institution) return { outcome: 'needs_review', reason: 'Untrusted sender' };
-  var text = normalizeText_(plainBody || htmlToText_(htmlBody));
+  // Normalize plain first. Venmo (and some other senders) ship an empty or
+  // whitespace-only text/plain part; `plainBody || html` would treat "\n" as
+  // present and skip the HTML that actually has the fields.
+  var text = normalizeText_(plainBody);
+  var htmlText = normalizeText_(htmlToText_(htmlBody));
+  if (!text) text = htmlText;
+  // Venmo's useful content lives in HTML; synthesized plain from Gmail can be
+  // non-empty but flattened so Date is not on its own line. Prefer HTML.
+  if (institution === 'Venmo' && htmlText) text = htmlText;
   if (institution === 'USAA') return parseUsaa_(text);
   if (institution === 'Chase') return parseChase_(subject, text);
   if (institution === 'Venmo') return parseVenmo_(subject, text);
@@ -209,7 +217,7 @@ function parseChasePurchase_(subject, text) {
 // "account ending in ####" from Payment Method fill the rest. Merchant is the
 // counterparty. No cardholder is present.
 function parseVenmo_(subject, text) {
-  var subjectLine = String(subject || '');
+  var subjectLine = String(subject || '').trim();
   var body = normalizeText_(text);
 
   var paymentSubject = subjectLine.match(/^You paid\s+(.+?)\s+(\$[\d,]+(?:\.\d{2})?)\s*$/i);
@@ -245,7 +253,9 @@ function parseVenmo_(subject, text) {
     if (bodyAmount) amountStr = '$' + bodyAmount[1] + '.' + bodyAmount[2];
   }
 
-  var date = body.match(/(?:^|\n)\s*Date\b\s*:?\s*([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})/i);
+  // Do not require Date at line start — Gmail-synthesized plain text can put
+  // "Transaction details Date Jun 05, 2026" on one line.
+  var date = body.match(/\bDate\b\s*:?\s*([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})/i);
   var last4Match = body.match(/account ending in\s+(\d{4})/i);
 
   if (!isPayment && !isReceived) {
