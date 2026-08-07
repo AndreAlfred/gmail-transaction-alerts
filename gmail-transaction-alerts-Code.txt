@@ -32,9 +32,9 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.5.0',
+  parserVersion: '1.5.1',
   trustedSenders: Object.freeze({
-    'usaa.customer.service@omem.usaa.com': 'USAA',
+    'usaa.customer.service@mailcenter.usaa.com': 'USAA',
     'no.reply.alerts@chase.com': 'Chase',
     'venmo@venmo.com': 'Venmo'
   }),
