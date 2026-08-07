@@ -58,13 +58,31 @@ The Setup tab said the transaction imported; the Transactions tab didn't show it
 
 ### Let the HTML-to-text normalizer do the structural work
 
-Chase renders each field as a two-cell table row (`<td>Merchant</td><td>SAMPLE*COFFEE SHOP</td>`). Because `htmlToText_` converts every `</tr>` to a newline and every remaining tag to a space, each field lands on its own line as `Label Value`. Anchoring regexes to line boundaries (`(?:^|\n)\s*Merchant\b`) is then both simple and robust.
+Chase renders each field as a nested two-cell table row (`<td>Merchant</td><td>SAMPLE*COFFEE SHOP</td>`). `htmlToText_` turns every `</tr>` into a newline and remaining tags into spaces, but **source newlines between the two `<td>`s survive**, so live alerts often normalize to consecutive lines (`Merchant` then `SAMPLE*COFFEE SHOP`) rather than a single `Label Value` line. Field regexes must allow `\s*` between label and value. Anchoring to line boundaries (`(?:^|\n)\s*Merchant\b`) is then both simple and robust.
 
 The alternative — regexing across the raw blob — would match the wrong things. This email body contains `manage your account` and `status of your accounts` in the footer, and a `$0.01` threshold amount *after* the real amount. Line anchoring plus first-match wins avoids all of it.
 
+### Chase debit alerts reuse the layout but not the vocabulary
+
+**What happened.** Credit purchase parsing worked against a live credit alert (Account / Date / Merchant / Amount). The matching debit alert from the same sender used Account ending in / Made on / Description / Amount, so the credit-only regexes sent every debit purchase to Needs Review.
+
+**How to apply.** Treat Chase credit and debit as two label dialects of one layout. Accept both label sets in `parseChasePurchase_`; do not assume "Merchant" or "Date" will appear. Debit account rows carry only `(...last4)`, so Card Type is `debit` from the alert wording — do not invent a product name.
+
 ### Prefer a fallback source over a failed parse, but never invent a value
 
-Merchant and amount also appear in the subject line, so the body parser falls back to it if the field table changes shape. That is recovering a value from a second real source — not the same as fabricating one. Chase alerts genuinely contain no cardholder name, so that field is left empty. Missing data goes to Needs Review or stays blank; it never gets guessed.
+Credit merchant and amount also appear in the subject line; debit amount appears in the subject and merchant in the body headline. Falling back to those is recovering a value from a second real source — not the same as fabricating one. Chase alerts genuinely contain no cardholder name, so that field is left empty. Missing data goes to Needs Review or stays blank; it never gets guessed.
+
+### Venmo splits the dollar amount across separate HTML nodes
+
+**What happened.** Venmo's hero amount is four siblings: `$`, the dollar digits, a `display:none` span holding `.`, and the cents. After `htmlToText_`, that becomes `$ 12 . 34` rather than `$12.34`. The subject line already carries a clean `$12.34`, so subject is the primary amount source and the spaced body form is only a fallback.
+
+**How to apply.** For Venmo, prefer subject amount/counterparty regexes (`You paid NAME $X.XX` / `NAME paid you $X.XX`) over reconstructing the split hero. Do not strip `display:none` content globally in `htmlToText_` just to fix this — that would be a cross-parser change for one sender's quirk.
+
+### An empty Venmo `text/plain` part makes `plainBody || html` pick the wrong source
+
+**What happened.** Live Venmo alerts are `multipart/alternative` with a blank text/plain body and all content in HTML. `parseAlert` used `normalizeText_(plainBody || htmlToText_(htmlBody))`. If `getPlainBody()` returned whitespace (truthy) or a flattened Gmail-synthesized plain string without a line-leading `Date`, the HTML was skipped or the Date regex missed, and a perfectly good payment went to Needs Review while subject parsing would have been fine.
+
+**How to apply.** Normalize plain first and fall back to HTML only when plain is empty after normalize. For Venmo, prefer the HTML-derived text whenever it is present. Do not require `Date` at line start in the Venmo parser.
 
 ### Never widen the sender allowlist to make a parser work
 
