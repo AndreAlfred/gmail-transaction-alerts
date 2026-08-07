@@ -9,7 +9,7 @@ It deliberately does one thing: **detect a supported transaction-alert email, ex
 | Institution | Sender | Handling |
 |---|---|---|
 | USAA | `USAA.customer.service@omem.usaa.com` | Purchase authorizations imported |
-| Chase | `no.reply.alerts@chase.com` | Credit and debit merchant purchases imported; scheduled card payments ignored |
+| Chase | `no.reply.alerts@chase.com` | Credit and debit merchant purchases and outbound transfers imported; scheduled card payments ignored |
 | Venmo | `venmo@venmo.com` | P2P payments you sent and payments you received imported; other Venmo mail goes to Needs Review |
 
 Anything else from a trusted sender is routed to an **Import Issues** sheet and labeled **Needs Review** rather than silently dropped. Mail from any other sender is rejected outright.
@@ -21,6 +21,8 @@ Anything else from a trusted sender is routed to an **Import Issues** sheet and 
 3. Save, reload the spreadsheet tab.
 4. **Transaction Alerts → Setup / Initialize** (authorize when prompted).
 5. **Transaction Alerts → Import Now**, then **Automatic Import → Every 5 minutes**.
+
+On the **Setup** sheet, `Import USAA`, `Import Chase`, and `Import Venmo` default to `TRUE`. Set any to `FALSE` to pause that institution without labeling its mail; turning it back on resumes import within the usual 30-day search window.
 
 `gmail-transaction-alerts-Code.txt` is a byte-identical copy of the `.gs`, for devices that won't open a `.gs` file. Regenerate it after any change:
 
@@ -63,7 +65,7 @@ The release version is `APP_CONFIG.parserVersion` in `gmail-transaction-alerts-C
 1. Bump `parserVersion` in the `.gs` file.
 2. `cp gmail-transaction-alerts-Code.gs gmail-transaction-alerts-Code.txt` (CI requires the two files to be **byte-identical**, not merely the same version string).
 3. Open a PR to `main`. CI fails if the version is still the same as `main`, or if the two files differ in any byte.
-4. After merge, the release workflow creates tag `X.Y.Z` (if new) and a GitHub Release with generated notes. It runs on merged PR close (primary), push to `main`, or manual **Run workflow** (`workflow_dispatch`). Duplicate runs are safe: an existing tag is skipped.
+4. After merge, the release workflow creates tag `X.Y.Z` (if new) and a GitHub Release whose **Changes** section is the PR description (falls back to GitHub-generated notes if the body is empty). It runs on merged PR close (primary), push to `main`, or manual **Run workflow** (`workflow_dispatch`). Duplicate runs are safe: an existing tag is skipped.
 
 | Change | Bump |
 |---|---|
@@ -94,6 +96,7 @@ Exact check names must match the workflow job `name:` fields above. If a check i
 
 - This is an **authorization-alert log, not a posted bank ledger.** Tips, refunds, reversals, and final posted amounts can differ from the alert.
 - Chase and Venmo alerts contain no cardholder name, so that column is blank on those rows. It is left empty rather than inferred.
+- Chase outbound transfers use **Card Type** `transfer` and **Event Type** `transfer_out`; **Merchant** is the recipient. Amount is positive.
 - Venmo amounts are always positive. **Event Type** is `venmo_payment` (you paid) or `venmo_payment_received` (someone paid you); **Card Type** is `payment` or `received`. **Merchant** is the counterparty name.
 - Only alerts that arrive as email are captured. If an alert doesn't fire, there's no row.
 

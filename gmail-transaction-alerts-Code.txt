@@ -22,19 +22,28 @@
  *
  * NOTES
  *   Chase and Venmo alerts do not include a cardholder name, so that cell is
- *   blank on those rows. Venmo amounts are always positive; Event Type is
- *   venmo_payment (you paid) or venmo_payment_received (someone paid you).
- *   This is an authorization-alert log, not a posted bank ledger: tips,
- *   refunds, and final posted amounts can differ.
+ *   blank on those rows. Chase outbound transfers use Card Type "transfer"
+ *   and Event Type transfer_out; Merchant is the recipient. Venmo amounts are
+ *   always positive; Event Type is venmo_payment (you paid) or
+ *   venmo_payment_received (someone paid you). This is an authorization-alert
+ *   log, not a posted bank ledger: tips, refunds, and final posted amounts
+ *   can differ.
  */
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.3.0',
+  parserVersion: '1.5.0',
   trustedSenders: Object.freeze({
     'usaa.customer.service@omem.usaa.com': 'USAA',
     'no.reply.alerts@chase.com': 'Chase',
     'venmo@venmo.com': 'Venmo'
+  }),
+  // Setup sheet rows that gate which institutions are searched. Seeded as TRUE
+  // once; initialize never overwrites an existing Value.
+  importToggles: Object.freeze({
+    'Import USAA': 'USAA',
+    'Import Chase': 'Chase',
+    'Import Venmo': 'Venmo'
   }),
   supportedIntervals: Object.freeze([1, 5, 10, 15, 30, 60]),
   labels: Object.freeze({
@@ -151,7 +160,60 @@ function parseChase_(subject, text) {
   if (/Payment scheduled/i.test(combined) && /credit card payment/i.test(combined)) {
     return { outcome: 'ignored', institution: 'Chase', eventType: 'card_payment_scheduled', reason: 'Scheduled card payment is not a merchant purchase' };
   }
+  // Outbound transfers: "You sent $X to RECIPIENT" / Transfer alert badge.
+  // Distinct from purchases (Merchant|Description) and card payments.
+  if (/You sent\s+\$[\d,]+(?:\.\d{2})?/i.test(combined) || /(?:^|\n)\s*Transfer alert\b/i.test(combined)) {
+    return parseChaseTransferOut_(subject, text);
+  }
   return parseChasePurchase_(subject, text);
+}
+
+// Chase outbound transfer to another bank/account. Field labels differ from
+// purchases: Account ending in / Sent on / Recipient / Amount. After
+// htmlToText_, label and value often land on consecutive lines, so field
+// regexes use \s*. Subject and body headline are fallbacks only. No
+// cardholder; Card Type is "transfer" because the account row is only (...last4).
+function parseChaseTransferOut_(subject, text) {
+  var subjectLine = String(subject || '');
+  var body = normalizeText_(text);
+  var combined = normalizeText_(subjectLine + '\n' + body);
+
+  var account = body.match(/(?:^|\n)\s*Account(?:\s+ending\s+in)?\b\s*:?\s*([^\n]*?)\s*\(?\s*(?:\u2026|\.{3})\s*(\d{4})\s*\)?\s*(?:\n|$)/i);
+  var date = body.match(/(?:^|\n)\s*Sent on\b\s*:?\s*([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})/i);
+  var recipient = body.match(/(?:^|\n)\s*Recipient\b\s*:?\s*([^\n]+)/i);
+  var amount = body.match(/(?:^|\n)\s*Amount\b\s*:?\s*(\$[\d,]+\.\d{2})/i);
+
+  // Subject: "You sent $250.00 from account ending in (...5678)"
+  var subjectMatch = subjectLine.match(/You sent\s+(\$[\d,]+(?:\.\d{2})?)\s+from account ending in\s*\(?\s*(?:\u2026|\.{3})\s*(\d{4})\s*\)?/i);
+  // Headline: "You sent $250.00 to SAMPLE CREDIT UNION"
+  var headline = combined.match(/You sent\s+(\$[\d,]+(?:\.\d{2})?)\s+to\s+([^\n]+)/i);
+
+  if (!recipient && headline) recipient = [null, headline[2]];
+  if (!amount && subjectMatch) amount = [null, subjectMatch[1]];
+  if (!amount && headline) amount = [null, headline[1]];
+
+  if (!date || !recipient || !amount) {
+    return { outcome: 'needs_review', institution: 'Chase', reason: 'Unsupported Chase alert format' };
+  }
+
+  var parsedDate = parseMonthNameDate_(date[1]);
+  var parsedAmount = parseAmount_(amount[1]);
+  if (!parsedDate || !Number.isFinite(parsedAmount)) {
+    return { outcome: 'needs_review', institution: 'Chase', reason: 'Invalid Chase date or amount' };
+  }
+
+  var last4 = account ? account[2] : (subjectMatch ? subjectMatch[2] : '');
+
+  return { outcome: 'imported', transaction: {
+    transactionDate: parsedDate,
+    institution: 'Chase',
+    cardType: 'transfer',
+    last4: last4,
+    cardholder: '',
+    merchant: String(recipient[1]).trim(),
+    amount: parsedAmount,
+    eventType: 'transfer_out'
+  }};
 }
 
 // Chase credit and debit purchase alerts both render each field as a nested
@@ -371,6 +433,7 @@ function initializeWorkbook() {
       .forEach(function (h) { tx.hideColumns(map[h], 1); });
   }
   getOrCreateSheet_('Setup', ['Setting','Value']); getOrCreateSheet_('Import Issues', ISSUE_HEADERS);
+  ensureImportToggles_();
   ensureLabels_(); setStatus_('Initialized', new Date());
 }
 function transactionValues_(tx, message, fingerprint) {
@@ -444,13 +507,80 @@ function setStatus_(key, value) {
   s.appendRow([key,value]);
 }
 
+// TRUE / true / 1 / boolean true → enabled. Blank and anything else → disabled.
+function isEnabledSetting_(value) {
+  if (value === true || value === 1) return true;
+  var s = String(value == null ? '' : value).trim().toLowerCase();
+  return s === 'true' || s === '1';
+}
+
+// Returns the raw Value for a Setup key, or null if the key row is absent.
+function readSetupSetting_(key) {
+  var s = SpreadsheetApp.getActive().getSheetByName('Setup');
+  if (!s) return null;
+  var values = s.getDataRange().getValues();
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][0]) === key) return values[i][1];
+  }
+  return null;
+}
+
+function importToggleKey_(institution) {
+  var toggles = APP_CONFIG.importToggles;
+  var keys = Object.keys(toggles);
+  for (var i = 0; i < keys.length; i++) {
+    if (toggles[keys[i]] === institution) return keys[i];
+  }
+  return null;
+}
+
+// Missing Setup row → enabled (older sheets before ensureImportToggles_ runs).
+// Present but blank/FALSE → disabled.
+function isInstitutionEnabled_(institution) {
+  var key = importToggleKey_(institution);
+  if (!key) return true;
+  var value = readSetupSetting_(key);
+  if (value === null) return true;
+  return isEnabledSetting_(value);
+}
+
+// Seed Import USAA / Chase / Venmo as TRUE if absent. Never overwrite a Value.
+function ensureImportToggles_() {
+  var s = getOrCreateSheet_('Setup', ['Setting', 'Value']);
+  var values = s.getDataRange().getValues();
+  var existing = {};
+  for (var i = 1; i < values.length; i++) existing[String(values[i][0])] = true;
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['TRUE', 'FALSE'], true)
+    .setAllowInvalid(false)
+    .build();
+  Object.keys(APP_CONFIG.importToggles).forEach(function (key) {
+    if (existing[key]) return;
+    s.appendRow([key, true]);
+    s.getRange(s.getLastRow(), 2).setDataValidation(rule);
+  });
+}
+
+function enabledTrustedSenders_() {
+  var all = APP_CONFIG.trustedSenders;
+  var out = {};
+  Object.keys(all).forEach(function (email) {
+    if (isInstitutionEnabled_(all[email])) out[email] = all[email];
+  });
+  return out;
+}
+
 // ===== appsscript/GmailIntake.gs =====
 function isTrustedSender_(sender) { return trustedInstitution_(sender) !== null; }
 function ensureLabels_() {
   Object.keys(APP_CONFIG.labels).forEach(function(k){ GmailApp.getUserLabelByName(APP_CONFIG.labels[k]) || GmailApp.createLabel(APP_CONFIG.labels[k]); });
 }
 function buildGmailQuery_() {
-  var senders = Object.keys(APP_CONFIG.trustedSenders).map(function(s){return 'from:'+s;}).join(' OR ');
+  var enabled = enabledTrustedSenders_();
+  var emails = Object.keys(enabled);
+  // No enabled institutions: match nothing rather than searching every sender.
+  if (emails.length === 0) return 'label:"__gmail_transaction_alerts_none__"';
+  var senders = emails.map(function(s){return 'from:'+s;}).join(' OR ');
   var query = 'newer_than:30d ('+senders+') -label:"'+APP_CONFIG.labels.imported+'" -label:"'+APP_CONFIG.labels.ignored+'" -label:"'+APP_CONFIG.labels.review+'"';
   var source = PropertiesService.getUserProperties().getProperty('SOURCE_LABEL');
   return source ? query+' label:"'+source.replace(/"/g,'')+'"' : query;
@@ -470,7 +600,11 @@ function importTransactionAlerts() {
   try {
     initializeWorkbook(); var labels={}; Object.keys(APP_CONFIG.labels).forEach(function(k){labels[k]=GmailApp.getUserLabelByName(APP_CONFIG.labels[k]);});
     GmailApp.search(buildGmailQuery_(),0,50).forEach(function(thread){ thread.getMessages().forEach(function(msg){
-      var sender=normalizeSender_(msg.getFrom()); if (!isTrustedSender_(sender)) return;
+      var sender=normalizeSender_(msg.getFrom());
+      var institution=trustedInstitution_(sender);
+      if (!institution) return;
+      // Defense in depth: skip unlabeled if a disabled institution still appears.
+      if (!isInstitutionEnabled_(institution)) return;
       var model=messageModel_(msg); if (hasMessageId_(model.id)) { thread.addLabel(labels.imported); return; }
       try {
         var parsed=parseAlert(sender,msg.getSubject(),msg.getBody(),msg.getPlainBody());
@@ -552,6 +686,10 @@ function showDiagnostics(){
   lines.push('Workbook ID: '+SpreadsheetApp.getActive().getId());
   lines.push('Parser: '+APP_CONFIG.parserVersion);
   lines.push('Import triggers: '+triggerCount);
+  lines.push('Import toggles:');
+  Object.keys(APP_CONFIG.importToggles).forEach(function(k){
+    lines.push('  '+k+': '+(isInstitutionEnabled_(APP_CONFIG.importToggles[k]) ? 'TRUE' : 'FALSE'));
+  });
   lines.push('Trusted senders:');
   Object.keys(APP_CONFIG.trustedSenders).forEach(function(k){ lines.push('  '+k+' -> '+APP_CONFIG.trustedSenders[k]); });
 
