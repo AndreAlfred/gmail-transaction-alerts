@@ -22,15 +22,17 @@
  *
  * NOTES
  *   Chase and Venmo alerts do not include a cardholder name, so that cell is
- *   blank on those rows. Venmo amounts are always positive; Event Type is
- *   venmo_payment (you paid) or venmo_payment_received (someone paid you).
- *   This is an authorization-alert log, not a posted bank ledger: tips,
- *   refunds, and final posted amounts can differ.
+ *   blank on those rows. Chase outbound transfers use Card Type "transfer"
+ *   and Event Type transfer_out; Merchant is the recipient. Venmo amounts are
+ *   always positive; Event Type is venmo_payment (you paid) or
+ *   venmo_payment_received (someone paid you). This is an authorization-alert
+ *   log, not a posted bank ledger: tips, refunds, and final posted amounts
+ *   can differ.
  */
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.2.1',
+  parserVersion: '1.3.0',
   trustedSenders: Object.freeze({
     'usaa.customer.service@omem.usaa.com': 'USAA',
     'no.reply.alerts@chase.com': 'Chase',
@@ -151,7 +153,60 @@ function parseChase_(subject, text) {
   if (/Payment scheduled/i.test(combined) && /credit card payment/i.test(combined)) {
     return { outcome: 'ignored', institution: 'Chase', eventType: 'card_payment_scheduled', reason: 'Scheduled card payment is not a merchant purchase' };
   }
+  // Outbound transfers: "You sent $X to RECIPIENT" / Transfer alert badge.
+  // Distinct from purchases (Merchant|Description) and card payments.
+  if (/You sent\s+\$[\d,]+(?:\.\d{2})?/i.test(combined) || /(?:^|\n)\s*Transfer alert\b/i.test(combined)) {
+    return parseChaseTransferOut_(subject, text);
+  }
   return parseChasePurchase_(subject, text);
+}
+
+// Chase outbound transfer to another bank/account. Field labels differ from
+// purchases: Account ending in / Sent on / Recipient / Amount. After
+// htmlToText_, label and value often land on consecutive lines, so field
+// regexes use \s*. Subject and body headline are fallbacks only. No
+// cardholder; Card Type is "transfer" because the account row is only (...last4).
+function parseChaseTransferOut_(subject, text) {
+  var subjectLine = String(subject || '');
+  var body = normalizeText_(text);
+  var combined = normalizeText_(subjectLine + '\n' + body);
+
+  var account = body.match(/(?:^|\n)\s*Account(?:\s+ending\s+in)?\b\s*:?\s*([^\n]*?)\s*\(?\s*(?:\u2026|\.{3})\s*(\d{4})\s*\)?\s*(?:\n|$)/i);
+  var date = body.match(/(?:^|\n)\s*Sent on\b\s*:?\s*([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})/i);
+  var recipient = body.match(/(?:^|\n)\s*Recipient\b\s*:?\s*([^\n]+)/i);
+  var amount = body.match(/(?:^|\n)\s*Amount\b\s*:?\s*(\$[\d,]+\.\d{2})/i);
+
+  // Subject: "You sent $250.00 from account ending in (...5678)"
+  var subjectMatch = subjectLine.match(/You sent\s+(\$[\d,]+(?:\.\d{2})?)\s+from account ending in\s*\(?\s*(?:\u2026|\.{3})\s*(\d{4})\s*\)?/i);
+  // Headline: "You sent $250.00 to SAMPLE CREDIT UNION"
+  var headline = combined.match(/You sent\s+(\$[\d,]+(?:\.\d{2})?)\s+to\s+([^\n]+)/i);
+
+  if (!recipient && headline) recipient = [null, headline[2]];
+  if (!amount && subjectMatch) amount = [null, subjectMatch[1]];
+  if (!amount && headline) amount = [null, headline[1]];
+
+  if (!date || !recipient || !amount) {
+    return { outcome: 'needs_review', institution: 'Chase', reason: 'Unsupported Chase alert format' };
+  }
+
+  var parsedDate = parseMonthNameDate_(date[1]);
+  var parsedAmount = parseAmount_(amount[1]);
+  if (!parsedDate || !Number.isFinite(parsedAmount)) {
+    return { outcome: 'needs_review', institution: 'Chase', reason: 'Invalid Chase date or amount' };
+  }
+
+  var last4 = account ? account[2] : (subjectMatch ? subjectMatch[2] : '');
+
+  return { outcome: 'imported', transaction: {
+    transactionDate: parsedDate,
+    institution: 'Chase',
+    cardType: 'transfer',
+    last4: last4,
+    cardholder: '',
+    merchant: String(recipient[1]).trim(),
+    amount: parsedAmount,
+    eventType: 'transfer_out'
+  }};
 }
 
 // Chase credit and debit purchase alerts both render each field as a nested
