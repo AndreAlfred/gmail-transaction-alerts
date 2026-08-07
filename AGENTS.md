@@ -116,24 +116,37 @@ Rows record `Gmail Message ID`, `Email Received At`, `Institution`, `Subject`, `
 - `ensureHeaders_` adds any missing header to the right of the existing ones, so sheets created by an earlier version keep their column positions and their old rows stay readable. Never reorder or rewrite existing headers as part of a migration.
 - Issue rows are appended with the same column-map and last-used-row logic as transactions, so a reviewer's own notes columns are safe.
 
+### Setup sheet configuration
+
+The Setup sheet holds both script-written status (`Last Checked`, `Last Result`, `Last Error`, `Last Imported Transaction`) and **user-editable config**: `Import USAA` / `Import Chase` / `Import Venmo`, seeded `TRUE` once and never overwritten by `initializeWorkbook`. Setting one to `FALSE` drops that institution from the Gmail search, so its mail stays unlabeled and resumes on re-enable within the 30-day window.
+
+This is the established home for user-editable config. Add new settings here as `Setting` / `Value` rows following the same seed-once-never-overwrite rule, rather than introducing a second config location.
+
+Config that lives in `APP_CONFIG` inside the script is **destroyed on every update**, because updating means pasting a new copy of the file over the old one. Anything a user is expected to change belongs on the Setup sheet, not in the source.
+
 ## Architecture
 
-The repository uses focused Apps Script modules:
+**The whole product is one file: `gmail-transaction-alerts-Code.gs`.** Users install it by pasting the entire file into `Code.gs` in a container-bound Apps Script project, so it cannot be split into modules — there is no build step and no `clasp` push in this repo.
 
-- `appsscript/Config.gs` — trusted senders, labels, parser version, schedules
-- `appsscript/Text.gs` — email HTML/text normalization
-- `appsscript/Parsers.gs` — sender routing and bank-specific parsing
-- `appsscript/Workbook.gs` — sheet initialization, rows, issues, status
-- `appsscript/GmailIntake.gs` — Gmail search, allowlist, labels, locking, deduplication
-- `appsscript/Triggers.gs` — 1/5/10/15/30/60-minute trigger controls
-- `appsscript/Menu.gs` — spreadsheet menu and user commands
-- `appsscript/appsscript.json` — Apps Script manifest and OAuth scopes
+The file keeps the original module boundaries as `// ===== appsscript/X.gs =====` section banners. They are organizational comments only; no such files exist. Respect the boundaries when adding code:
 
-For quick manual installation, all `.gs` modules are also concatenated into:
+| Section | Holds |
+|---|---|
+| `Config.gs` | `APP_CONFIG`: parser version, trusted senders, import toggles, intervals, label names |
+| `Text.gs` | HTML/entity/whitespace normalization, date and amount parsing |
+| `Parsers.gs` | `trustedInstitution_`, `parseAlert` routing, per-institution parsers |
+| `Workbook.gs` | Sheet creation, column mapping, append paths, status rows |
+| `GmailIntake.gs` | Gmail search, allowlist enforcement, labels, locking, dedup |
+| `Triggers.gs` | Time-driven trigger install/remove |
+| `Menu.gs` | Menu, Diagnostics, and user-invoked commands |
 
-- `/var/minis/workspace/gmail-transaction-alerts-Code.gs`
+`gmail-transaction-alerts-Code.txt` is a **byte-identical** copy for devices that won't open a `.gs`. CI enforces this. Regenerate it in the same commit as any script change:
 
-The modular files are authoritative for development. Regenerate the bundle after revisions.
+```bash
+cp gmail-transaction-alerts-Code.gs gmail-transaction-alerts-Code.txt
+```
+
+**Runtime:** the script requires the **V8** Apps Script runtime — it uses `padStart` and `Number.isFinite`, neither of which exists under legacy Rhino. New Apps Script projects default to V8.
 
 ## Gmail disposition labels
 
@@ -169,84 +182,74 @@ Preserve these boundaries when revising:
 
 Parser changes should be fixture-driven and test-first:
 
-1. Obtain a real email’s plain-text body or **Show original** source.
-2. Redact personal data while preserving labels, wording, whitespace structure, and representative fictitious values.
-3. Save the synthetic/redacted fixture under `fixtures/`.
-4. Add a failing test in `tests/parser.test.js`.
-5. Run `npm test` and confirm the expected failure.
-6. Modify only the relevant parser in `appsscript/Parsers.gs` where practical.
-7. Run the full test suite and confirm all tests pass.
-8. Regenerate the bundled `gmail-transaction-alerts-Code.gs` file.
-9. Test against the real Gmail message in a disposable private spreadsheet.
+1. Obtain a real email’s **Show original** source or plain-text body.
+2. Redact personal data while preserving labels, wording, and whitespace structure. Replace values with obviously fictitious ones — a real merchant and amount are personal data too, not just card digits.
+3. Save the synthetic fixture under `fixtures/`.
+4. Add a failing test in the matching `tests/<institution>.test.js` (create one if the institution is new).
+5. Run it and confirm it fails for the expected reason:
+   ```bash
+   node --test tests/*.test.js
+   ```
+   There is no `package.json` and no `npm test` — Node's built-in runner is the whole harness. Pass explicit paths or a glob; a bare directory argument is treated as a module and throws.
+6. Change only the relevant parser in the `Parsers.gs` section.
+7. Re-run the full suite.
+8. `cp gmail-transaction-alerts-Code.gs gmail-transaction-alerts-Code.txt`
+9. Bump `parserVersion` — see **Releasing and versioning** below.
+10. Test against the real Gmail message in a disposable private spreadsheet.
 
 Do not loosen sender checks or write one broad regex that mixes banks and message types.
 
-## Current verification status
+## Releasing and versioning
 
-Local synthetic tests cover:
+`APP_CONFIG.parserVersion` **is** the release version. Tags and GitHub Releases use it verbatim, with no `v` prefix.
 
-- USAA purchase extraction
-- Chase scheduled-payment exclusion
-- unknown Chase review routing
-- transaction-row column order
-- exact trusted-sender matching
-- allowed polling intervals
+Two CI checks gate every PR to `main`, and both must pass:
 
-Plus, in `tests/chase-purchase.test.js` against `fixtures/chase-purchase-alert.html` and `fixtures/chase-debit-purchase-alert.html`:
+| Check | Requires |
+|---|---|
+| `tests` | `node --test tests/*.test.js` passes |
+| `version-check` | `.gs` and `.txt` **byte-identical**, and `parserVersion` bumped whenever either changes |
 
-- Chase credit merchant-purchase extraction from the alert body
-- Chase credit Account product name preserved as cardType
-- Chase debit purchase extraction (Made on / Description / Account ending in)
-- subject-line fallback for credit merchant and amount
-- debit headline/subject fallback for merchant and amount
-- Chase purchase with no recoverable date routed to review
-- scheduled payment still ignored, not imported
-- purchase-shaped alert from a lookalike sender rejected
-- month-name date parsing across abbreviations
+| Change | Bump |
+|---|---|
+| Parser behavior, new alert type, sheet write semantics | minor (major if the sheet column contract breaks) |
+| Bug fix preserving behavior | patch |
+| Docs, CI, or tests only — no `.gs` / `.txt` change | none |
 
-Plus, in `tests/chase-transfer.test.js` against `fixtures/chase-transfer-out-alert.html`:
+If you branched before someone else merged, **resolve the version forward** rather than taking either side: a branch at `1.3.0` merging a `main` at `1.4.0` becomes `1.5.0`, not one of the two. Taking either side silently discards a release.
 
-- Chase outbound transfer extraction (Sent on / Recipient / Account ending in)
-- subject/headline fallback for recipient and amount
-- Chase transfer with no recoverable date routed to review
-- transfer-shaped alert from a lookalike sender rejected
-- scheduled payment still ignored after transfer support
+After merge, the release workflow tags the version and publishes a release whose notes are the PR description. Write the PR body as the changelog entry it will become.
 
-Plus, in `tests/venmo.test.js` against `fixtures/venmo-payment-alert.html` and `fixtures/venmo-income-alert.html`:
+## Verification
 
-- Venmo payment (you paid) extraction
-- Venmo income (paid you) extraction
-- subject-line fallback for counterparty and amount
-- Venmo alert with no date routed to review
-- Venmo whitespace-only plain body falls back to HTML
-- Venmo prefers HTML over flattened non-empty plain
-- Venmo Date match when not at line start
-- Venmo-shaped alert from a lookalike sender rejected
-- unknown Venmo format from the trusted sender routed to review
+Test suites live in `tests/`, one per institution plus two for sheet behavior:
 
-The code has not yet completed a real Google Apps Script smoke test. Remaining verification:
+| Suite | Covers |
+|---|---|
+| `chase-purchase.test.js` | Chase credit and debit purchases, subject fallbacks, sender allowlist |
+| `chase-transfer.test.js` | Chase outbound transfers |
+| `venmo.test.js` | Venmo sent/received, HTML-over-plain body selection |
+| `import-issues.test.js` | Issue row contents, header migration, formula neutralization |
+| `import-toggles.test.js` | Per-institution Setup toggles and query filtering |
+| `sheet-append.test.js` | Append anchor, manual rows, column mapping |
 
-1. Install in a bound Apps Script project.
-2. Run `initializeWorkbook()` twice and confirm idempotence.
-3. Run Import Now against the real USAA alert.
-4. Confirm exactly one row and the Imported label.
-5. Run again and confirm no duplicate.
-6. Confirm the supplied Chase payment receives Ignored and no transaction row.
-7. Install, replace, and disable time triggers.
-8. Confirm no full email content or credentials appear in Setup or Import Issues.
+Do not maintain a list of individual test names here — it rots faster than anyone updates it. Read the suite.
 
-## Repository state
+`tests/helpers/fake-sheet.js` is a Sheets test double implementing only the API surface the workbook code touches. Extend it when you need another method; objects it returns live in a `vm` realm, so compare with a spread (`{ ...result }`) or `deepStrictEqual` fails on the prototype alone.
 
-- Repository: `/var/minis/workspace/simplefin-sheets`
-- Active worktree: `/var/minis/workspace/simplefin-sheets/.worktrees/gmail-alert-intake`
-- Branch: `feature/gmail-alert-intake`
-- Latest implementation commit at handoff: `04f7d25`
-- Approved design: `docs/superpowers/specs/2026-08-01-gmail-transaction-alerts-design.md`
-- Implementation plan: `docs/superpowers/plans/2026-08-01-gmail-transaction-alerts.md`
-- Archived SimpleFIN draft: `docs/superpowers/specs/2026-08-01-simplefin-sheets-design.md`
+**Not covered by tests, and still worth doing by hand** in a disposable private spreadsheet:
+
+1. Run `initializeWorkbook()` twice and confirm idempotence.
+2. Import Now against a real alert; confirm exactly one row and the Imported label.
+3. Run again; confirm no duplicate.
+4. Confirm a scheduled Chase payment gets Ignored and no transaction row.
+5. Install, replace, and disable time triggers.
+6. Confirm no email body or credentials appear in Setup or Import Issues.
 
 ## Scope guidance
 
 Optimize for a working, understandable product quickly. Avoid reintroducing categories, budgets, dashboards, transfer matching, AI, or financial aggregation unless the end user explicitly asks for a new scope.
 
-The Chase merchant-purchase parser is now implemented. Note that end users are doing their own categorization in extra columns on the Transactions sheet — support that by keeping the sheet write path column-name-driven, rather than by building categorization into the product.
+End users do their own categorization in extra columns on the Transactions sheet, and type occasional cash rows by hand. Support that by keeping the sheet write path column-name-driven and content-anchored — not by building categorization into the product.
+
+Known gap, deliberately unaddressed: **the trusted-sender list still lives in `APP_CONFIG`**, so a user who edits it loses that edit on the next update. Moving it to the Setup sheet is the obvious fix and has been discussed; check with the other contributor before starting, since the Setup toggles work landed in this area.

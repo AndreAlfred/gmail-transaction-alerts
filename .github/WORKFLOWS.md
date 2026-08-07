@@ -1,5 +1,8 @@
 # GitHub Actions
 
+<!-- Named WORKFLOWS.md, not README.md: GitHub renders .github/README.md as the
+     repository landing page in place of the root README. -->
+
 Workflows for this repository live under [`workflows/`](workflows/).
 
 | Workflow | Job name | Required on `main`? | Purpose |
