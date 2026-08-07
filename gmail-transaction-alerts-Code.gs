@@ -30,7 +30,7 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.2.1',
+  parserVersion: '1.3.0',
   trustedSenders: Object.freeze({
     'usaa.customer.service@omem.usaa.com': 'USAA',
     'no.reply.alerts@chase.com': 'Chase',
