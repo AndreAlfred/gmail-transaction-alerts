@@ -47,7 +47,37 @@ class FakeSheet {
         values.forEach((line, r) => line.forEach((v, c) => sheet.write(row + r, col + c, v)));
         return this;
       },
-      setNumberFormat() { return this; }
+      setNumberFormat() { return this; },
+      /**
+       * Mirrors Apps Script Range.sort: sortSpecs use 1-based column indexes
+       * relative to this range (column 1 = first column of the range).
+       */
+      sort(sortSpecs) {
+        const specs = Array.isArray(sortSpecs) ? sortSpecs : [sortSpecs];
+        const rows = [];
+        for (let r = 0; r < numRows; r++) {
+          const line = [];
+          for (let c = 0; c < numCols; c++) line.push(sheet.cell(row + r, col + c));
+          rows.push(line);
+        }
+        rows.sort((a, b) => {
+          for (const spec of specs) {
+            const idx = Number(spec.column) - 1;
+            const asc = spec.ascending !== false;
+            const av = a[idx];
+            const bv = b[idx];
+            const as = av === null || av === undefined ? '' : av;
+            const bs = bv === null || bv === undefined ? '' : bv;
+            if (as < bs) return asc ? -1 : 1;
+            if (as > bs) return asc ? 1 : -1;
+          }
+          return 0;
+        });
+        rows.forEach((line, r) => {
+          line.forEach((v, c) => sheet.write(row + r, col + c, v));
+        });
+        return this;
+      }
     };
   }
 

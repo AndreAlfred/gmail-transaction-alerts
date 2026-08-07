@@ -28,12 +28,16 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.1.0',
+  parserVersion: '1.2.0',
   trustedSenders: Object.freeze({
     'usaa.customer.service@omem.usaa.com': 'USAA',
     'no.reply.alerts@chase.com': 'Chase'
   }),
   supportedIntervals: Object.freeze([1, 5, 10, 15, 30, 60]),
+  // Setup "Transaction Order": append still lands at the bottom, then the
+  // occupied block is sorted by Transaction Date (Imported At tie-break) so
+  // custom columns stay glued to their rows.
+  transactionOrders: Object.freeze(['oldest first', 'newest first']),
   labels: Object.freeze({
     imported: 'Bank Transactions/Imported',
     ignored: 'Bank Transactions/Ignored',
@@ -266,8 +270,69 @@ function initializeWorkbook() {
       .forEach(function (h) { tx.hideColumns(map[h], 1); });
   }
   getOrCreateSheet_('Setup', ['Setting','Value']); getOrCreateSheet_('Import Issues', ISSUE_HEADERS);
+  ensureTransactionOrderSetting_();
   ensureLabels_(); setStatus_('Initialized', new Date());
 }
+
+// Normalizes Setup / menu input to a known order. Unknown or empty -> oldest first.
+function normalizeTransactionOrder_(value) {
+  var v = String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (v === 'newest first' || v === 'newest') return 'newest first';
+  return 'oldest first';
+}
+
+function getTransactionOrder_() {
+  return normalizeTransactionOrder_(getStatus_('Transaction Order'));
+}
+
+function setTransactionOrder_(order) {
+  var normalized = normalizeTransactionOrder_(order);
+  // Only accept the two canonical phrases (normalize maps typos/aliases).
+  if (APP_CONFIG.transactionOrders.indexOf(normalized) < 0) normalized = 'oldest first';
+  setStatus_('Transaction Order', normalized);
+  return normalized;
+}
+
+function ensureTransactionOrderSetting_() {
+  if (!String(getStatus_('Transaction Order') || '').trim()) {
+    setStatus_('Transaction Order', 'oldest first');
+  }
+}
+
+// Sorts the occupied Transactions block in place. Whole rows move together so
+// user columns (Category, etc.) stay with their transaction. Testable without
+// SpreadsheetApp when a sheet is passed in.
+function sortSheetByTransactionOrder_(sheet, order) {
+  if (!sheet) return;
+  var map = getColumnMap_(sheet, TRANSACTION_HEADERS);
+  var last = lastUsedScriptRow_(sheet, map);
+  if (last < 3) return; // need at least two data rows
+  var ownedLast = Math.max.apply(null, TRANSACTION_HEADERS.map(function (h) { return map[h]; }));
+  var lastCol = Math.max(sheet.getLastColumn() || 0, ownedLast);
+  var ascending = normalizeTransactionOrder_(order) !== 'newest first';
+  // Range starts at column 1, so sort "column" indexes match sheet column numbers.
+  sheet.getRange(2, 1, last - 1, lastCol).sort([
+    { column: map['Transaction Date'], ascending: ascending },
+    { column: map['Imported At'], ascending: ascending }
+  ]);
+}
+
+function sortTransactionsByOrder_() {
+  var sheet = SpreadsheetApp.getActive().getSheetByName('Transactions');
+  if (!sheet) return;
+  sortSheetByTransactionOrder_(sheet, getTransactionOrder_());
+}
+
+function applyTransactionOrderNow() {
+  initializeWorkbook();
+  sortTransactionsByOrder_();
+  SpreadsheetApp.getActive().toast(
+    'Transactions sorted: ' + getTransactionOrder_(),
+    'Transaction Alerts',
+    5
+  );
+}
+
 function transactionValues_(tx, message, fingerprint) {
   return {
     'Imported At': new Date().toISOString(),
@@ -351,6 +416,9 @@ function importTransactionAlerts() {
         setStatus_('Last Error At', new Date());
       }
     }); });
+    // One sort per run after appends so new rows land in chronological order
+    // without top-insert, and custom columns move with their rows.
+    if (counts.imported > 0) sortTransactionsByOrder_();
     setStatus_('Last Checked',new Date()); setStatus_('Last Result',JSON.stringify(counts));
   } finally { lock.releaseLock(); }
 }
@@ -366,11 +434,19 @@ function disableAutomaticImport(){ removeIntakeTriggers_(); PropertiesService.ge
 function schedule1(){installSchedule(1);} function schedule5(){installSchedule(5);} function schedule10(){installSchedule(10);} function schedule15(){installSchedule(15);} function schedule30(){installSchedule(30);} function schedule60(){installSchedule(60);}
 
 // ===== appsscript/Menu.gs =====
+function orderOldestFirst(){ setTransactionOrder_('oldest first'); SpreadsheetApp.getActive().toast('Transaction Order: oldest first','Transaction Alerts',5); }
+function orderNewestFirst(){ setTransactionOrder_('newest first'); SpreadsheetApp.getActive().toast('Transaction Order: newest first','Transaction Alerts',5); }
+
 function onOpen(){
   SpreadsheetApp.getUi().createMenu('Transaction Alerts')
     .addItem('Setup / Initialize','initializeWorkbook').addItem('Import Now','importNow')
     .addSubMenu(SpreadsheetApp.getUi().createMenu('Automatic Import').addItem('Every minute','schedule1').addItem('Every 5 minutes','schedule5').addItem('Every 10 minutes','schedule10').addItem('Every 15 minutes','schedule15').addItem('Every 30 minutes','schedule30').addItem('Every hour','schedule60'))
-    .addItem('Disable Automatic Import','disableAutomaticImport').addSeparator()
+    .addItem('Disable Automatic Import','disableAutomaticImport')
+    .addSubMenu(SpreadsheetApp.getUi().createMenu('Transaction Order')
+      .addItem('Oldest first','orderOldestFirst')
+      .addItem('Newest first','orderNewestFirst')
+      .addItem('Apply order now','applyTransactionOrderNow'))
+    .addSeparator()
     .addItem('Reprocess Selected Issue','reprocessSelectedIssue')
     .addItem('Go To Last Imported Row','goToLastImportedRow')
     .addItem('Diagnostics','showDiagnostics').addToUi();
@@ -427,7 +503,12 @@ function showDiagnostics(){
       var last=lastUsedScriptRow_(sheet,map);
       lines.push('\nHeader row: OK (all 13 columns found)');
       lines.push('Rows in use: '+Math.max(0,last-1));
-      lines.push('Next import writes to row: '+(last+1));
+      lines.push('Next import writes to row: '+(last+1)+' (then sorts by Transaction Order)');
+      lines.push('Transaction Order: '+getTransactionOrder_());
+      if(getTransactionOrder_()==='newest first'){
+        lines.push('NOTE: after import, rows are sorted newest-first; new purchases');
+        lines.push('appear near the top. The write itself still appends, then sorts.');
+      }
       lines.push('Sheet last row (incl. your formulas): '+sheet.getLastRow());
       if(sheet.getLastRow()>last+1){
         lines.push('NOTE: your formulas extend past the data. That is fine --');

@@ -45,6 +45,12 @@ Two details that make this safe: the append row is located by scanning every scr
 
 **You can also type rows by hand** — a cash purchase, say. Fill in Transaction Date, Merchant, Amount, and whatever else is useful; leave the hidden audit columns blank. The importer treats a manual row as occupied and appends below it, and dedup ignores it (there's no message ID to match).
 
+## Transaction order
+
+New rows are always **appended** at the bottom of the occupied block, then the sheet is **sorted** by Transaction Date (Imported At as tie-break) so custom columns like Category stay with their rows.
+
+Set the direction on the **Setup** sheet (`Transaction Order` → `oldest first` or `newest first`), or via **Transaction Alerts → Transaction Order**. Use **Apply order now** to re-sort without importing. Default is `oldest first`.
+
 ## Tests
 
 ```bash
