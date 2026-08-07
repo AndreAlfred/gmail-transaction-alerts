@@ -1,8 +1,20 @@
 name: Release
 
+# Merges fire ONE release run, from the merged pull request.
+#
+# There was previously also a `push: branches: [main]` trigger. A merge fires
+# both at once, they race to push the same tag, and the loser fails with
+# "tag already exists" -- so every merge left a red run behind. The existing-tag
+# guard below cannot prevent it: both runs check before either pushes.
+#
+# Losing the race also lost the release notes. Notes come from the pull request
+# body, which only the pull_request run has, so whenever the push run won, the
+# release fell back to generated notes. 1.4.0 and 1.5.0 were published that way.
+#
+# Direct pushes to main therefore no longer release. That is intended: main
+# takes pull requests only (see AGENTS.md). Use the manual Run workflow button
+# if a release is ever needed without one.
 on:
-  push:
-    branches: [main]
   pull_request:
     types: [closed]
     branches: [main]
@@ -15,7 +27,6 @@ jobs:
   release:
     name: release
     if: >
-      github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true &&
        github.event.pull_request.head.repo.full_name == github.repository)
