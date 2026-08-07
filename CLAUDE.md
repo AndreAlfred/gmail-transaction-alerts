@@ -46,18 +46,20 @@ The script searches Gmail for messages from these exact trusted senders:
 
 - USAA: `USAA.customer.service@omem.usaa.com`
 - Chase: `no.reply.alerts@chase.com`
+- Venmo: `venmo@venmo.com`
 
 Current parser coverage:
 
 1. **USAA purchase authorizations** matching wording like:
-   `Your credit card ...7484 was charged $7.56 at MERCHANT.`
-   followed by Date and Cardholder name fields.
+ `Your credit card ...7484 was charged $7.56 at MERCHANT.`
+ followed by Date and Cardholder name fields.
 2. **Chase credit-card merchant purchases**, e.g. subject `You made a $12.34 transaction with SAMPLE*COFFEE SHOP`. Field labels: Account / Date / Merchant / Amount. Merchant and amount fall back to the subject line if the body layout changes. Card Type is the Account product name (lowercased).
 3. **Chase debit-card purchases**, e.g. subject `Your debit card transaction of $12.34 from account ending in (…1234)`. Field labels differ: Account ending in / Made on / Description / Amount. Merchant falls back to the body headline (`You made a debit card transaction of $… with MERCHANT`); amount can fall back to the subject. Card Type is `debit` because the account row carries only `(...last4)`.
 4. **Chase scheduled credit-card payments**, which are recognized but intentionally ignored because they are not merchant purchases.
-5. Other trusted-sender formats are sent to **Import Issues** and labeled **Needs Review** rather than silently discarded.
+5. **Venmo P2P payments** you sent (`You paid NAME $X.XX`) and **payments received** (`NAME paid you $X.XX`). Merchant is the counterparty. Card Type is `payment` or `received`. Amount is always positive; Event Type distinguishes direction (`venmo_payment` / `venmo_payment_received`). Payment alerts may carry Last 4 from `Payment Method` (`account ending in ####`); received alerts leave Last 4 blank. Other Venmo mail goes to Needs Review.
+6. Other trusted-sender formats are sent to **Import Issues** and labeled **Needs Review** rather than silently discarded.
 
-Chase credit and debit alerts both render fields as nested two-cell HTML table rows. After `htmlToText_`, the label and value often land on consecutive lines (source newlines between `</td>` and `<td>`), so parsers bridge with `\s*` rather than requiring `Label Value` on one line. **Chase alerts carry no cardholder name**, so that column is left empty rather than fabricated.
+Chase credit and debit alerts both render fields as nested two-cell HTML table rows. After `htmlToText_`, the label and value often land on consecutive lines (source newlines between `</td>` and `<td>`), so parsers bridge with `\s*` rather than requiring `Label Value` on one line. **Chase and Venmo alerts carry no cardholder name**, so that column is left empty rather than fabricated.
 
 The Transactions sheet contains:
 
@@ -178,6 +180,15 @@ Plus, in `tests/chase-purchase.test.js` against `fixtures/chase-purchase-alert.h
 - scheduled payment still ignored, not imported
 - purchase-shaped alert from a lookalike sender rejected
 - month-name date parsing across abbreviations
+
+Plus, in `tests/venmo.test.js` against `fixtures/venmo-payment-alert.html` and `fixtures/venmo-income-alert.html`:
+
+- Venmo payment (you paid) extraction
+- Venmo income (paid you) extraction
+- subject-line fallback for counterparty and amount
+- Venmo alert with no date routed to review
+- Venmo-shaped alert from a lookalike sender rejected
+- unknown Venmo format from the trusted sender routed to review
 
 The code has not yet completed a real Google Apps Script smoke test. Remaining verification:
 
