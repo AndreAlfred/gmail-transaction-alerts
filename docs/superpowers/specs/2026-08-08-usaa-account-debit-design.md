@@ -9,17 +9,37 @@ USAA sends a "Debit Alert for Your USAA Bank Account" email when money leaves a
 bank account by an amount over the user's configured threshold. The script does
 not import it today, for two independent reasons:
 
-1. **The sender is not on the allowlist.** These alerts come from
-   `USAA.Customer.Service@mailcenter.usaa.com`. The allowlist has only
-   `usaa.customer.service@omem.usaa.com` — a different subdomain — so
-   `trustedInstitution_` returns null and the message is recorded as
-   "Untrusted sender" before any parser runs.
+1. **The sender allowlist only ever holds one USAA address at a time.** These
+   alerts come from `USAA.Customer.Service@mailcenter.usaa.com`, a different
+   subdomain from the `usaa.customer.service@omem.usaa.com` the script shipped
+   with. An address that is not listed makes `trustedInstitution_` return null,
+   and the message is recorded as "Untrusted sender" before any parser runs.
 2. **No parser matches the format.** `parseUsaa_` requires the purchase
    wording (`Your credit card ...7484 was charged $X at MERCHANT`) plus a
    `Cardholder name:` field. A bank-account debit has none of those.
 
 The alert is genuinely from USAA: DKIM `d=usaa.com` passes, SPF passes, and
 DMARC passes under `p=REJECT`.
+
+### Discovered mid-implementation: `main` had already swapped the address
+
+PR #17 (`feature/usaa-mailcenter`, commit `aef3b93`) **replaced** the `omem`
+entry with `mailcenter` rather than adding it:
+
+```diff
+-    'usaa.customer.service@omem.usaa.com': 'USAA',
++    'usaa.customer.service@mailcenter.usaa.com': 'USAA',
+```
+
+That merge left four tests failing on a clean `main` checkout, so the `tests`
+CI check did not gate it. More importantly, if USAA still sends card purchase
+alerts from `omem`, that swap silently stopped them importing — a rejected
+sender produces no error, only a growing Import Issues tab.
+
+This design already called for listing both addresses, which resolves the
+regression either way: if `omem` is retired the entry never matches and costs
+nothing; if it is live, purchase alerts keep working. Restoring it also fixes
+three of the four failing tests without any test edit.
 
 ## Format
 
@@ -30,12 +50,12 @@ that rather than the HTML. After quoted-printable decoding and `normalizeText_`
 ```
 USAA SECURITY ZONE Firstname Lastname USAA # ending in: 0000 Hi, Firstname.
 
-$35.00 came out of your account ending in 1234.
+$88.45 came out of your account ending in 7788.
 
 To:
 USAA DEBIT
 Date:
-08/07/26
+08/04/26
 Check My Account
 ```
 
@@ -62,7 +82,8 @@ changes are fixture-driven. Deposit alerts continue to go to Needs Review.
 
 ### 1. Sender (`Config.gs`)
 
-Add a second exact address mapping to the same institution:
+List both exact addresses against the same institution, restoring the entry
+PR #17 removed:
 
 ```js
 'usaa.customer.service@omem.usaa.com':       'USAA',
@@ -111,7 +132,7 @@ returns `needs_review`.
 
 **Cardholder is best-effort.** If USAA reshapes the security-zone header the
 name comes back empty rather than failing the import — refusing an otherwise
-complete $35.00 debit over a cosmetic header would lose real data. This is not
+complete debit over a cosmetic header would lose real data. This is not
 fabrication: the field is left blank, never guessed.
 
 **The `To:` row is not required.** Its value (`USAA DEBIT`) is discarded in
@@ -152,11 +173,13 @@ point.
 - the existing purchase format still imports through the new router
 
 `tests/import-toggles.test.js` asserts the full enabled-sender key set with
-`deepStrictEqual`; that expected set gains the new address.
+`deepStrictEqual`; that expected set gains the second address. Its other two
+USAA assertions, and the case-insensitivity test in `chase-purchase.test.js`,
+start passing again as soon as `omem` is restored.
 
 ### 6. Version and docs
 
-- `parserVersion` `1.5.0` → `1.6.0` (new alert type is a minor bump)
+- `parserVersion` `1.5.1` → `1.6.0` (new alert type is a minor bump)
 - regenerate `gmail-transaction-alerts-Code.txt` in the same commit
 - `README.md`: both USAA addresses; note that deposits go to Needs Review
 - `AGENTS.md` and `CLAUDE.md` (byte-identical): parser coverage list, test table

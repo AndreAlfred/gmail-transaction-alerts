@@ -8,7 +8,7 @@ It deliberately does one thing: **detect a supported transaction-alert email, ex
 
 | Institution | Sender | Handling |
 |---|---|---|
-| USAA | `USAA.customer.service@omem.usaa.com` | Purchase authorizations imported |
+| USAA | `USAA.customer.service@omem.usaa.com`<br>`USAA.Customer.Service@mailcenter.usaa.com` | Card purchase authorizations and bank-account debit alerts imported; account **deposit** alerts go to Needs Review |
 | Chase | `no.reply.alerts@chase.com` | Credit and debit merchant purchases and outbound transfers imported; scheduled card payments ignored |
 | Venmo | `venmo@venmo.com` | P2P payments you sent and payments you received imported; other Venmo mail goes to Needs Review |
 

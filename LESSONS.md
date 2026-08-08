@@ -94,6 +94,12 @@ Credit merchant and amount also appear in the subject line; debit amount appears
 
 The allowlist is a security boundary, not a convenience. A lookalike sender (`alerts@chase.com.example.net`) must be rejected even when the message body parses perfectly — there is a test asserting exactly this. If a legitimate email is being rejected, fix the sender entry, don't loosen the match.
 
+### One institution can send from several subdomains — add an address, never swap one
+
+USAA sends card purchase alerts from `omem.usaa.com` and bank-account alerts from `mailcenter.usaa.com`. A PR that needed the second one **replaced** the first instead of adding it. Nothing in the product surfaces that: an unlisted sender isn't an error, it's an "Untrusted sender" row in Import Issues, so purchase alerts simply stop appearing and the failure looks like "nothing is importing." Four tests were left failing on `main`, which also means the merge went in without the `tests` check passing.
+
+`trustedSenders` is a map of address → institution, and `enabledTrustedSenders_` keys on the address while gating on the institution, so several addresses for one institution work correctly and share that institution's Setup toggle. Adding an address is cheap and reversible; removing one is a silent data-loss regression. Unless you have positive evidence an address is retired, keep it — a dead entry costs nothing because it simply never matches.
+
 ---
 
 ## Fixtures and privacy
