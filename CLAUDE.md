@@ -57,8 +57,8 @@ The active implementation deliberately avoids SimpleFIN, Plaid, external servers
 
 The script searches Gmail for messages from these exact trusted senders:
 
-- USAA: `USAA.customer.service@omem.usaa.com` and `USAA.Customer.Service@mailcenter.usaa.com`
-  (USAA sends from more than one subdomain; both are listed so neither is rejected)
+- USAA: `USAA.Customer.Service@mailcenter.usaa.com`
+  (USAA moved off the older `omem` subdomain; it is retired and intentionally not listed)
 - Chase: `no.reply.alerts@chase.com`
 - Venmo: `venmo@venmo.com`
 

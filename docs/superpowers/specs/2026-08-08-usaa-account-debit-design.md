@@ -9,11 +9,11 @@ USAA sends a "Debit Alert for Your USAA Bank Account" email when money leaves a
 bank account by an amount over the user's configured threshold. The script does
 not import it today, for two independent reasons:
 
-1. **The sender allowlist only ever holds one USAA address at a time.** These
-   alerts come from `USAA.Customer.Service@mailcenter.usaa.com`, a different
-   subdomain from the `usaa.customer.service@omem.usaa.com` the script shipped
-   with. An address that is not listed makes `trustedInstitution_` return null,
-   and the message is recorded as "Untrusted sender" before any parser runs.
+1. **The sender allowlist did not match.** These alerts come from
+   `USAA.Customer.Service@mailcenter.usaa.com`, a different subdomain from the
+   `usaa.customer.service@omem.usaa.com` the script originally shipped with. An
+   address that is not listed makes `trustedInstitution_` return null, and the
+   message is recorded as "Untrusted sender" before any parser runs.
 2. **No parser matches the format.** `parseUsaa_` requires the purchase
    wording (`Your credit card ...7484 was charged $X at MERCHANT`) plus a
    `Cardholder name:` field. A bank-account debit has none of those.
@@ -23,23 +23,23 @@ DMARC passes under `p=REJECT`.
 
 ### Discovered mid-implementation: `main` had already swapped the address
 
-PR #17 (`feature/usaa-mailcenter`, commit `aef3b93`) **replaced** the `omem`
-entry with `mailcenter` rather than adding it:
+PR #17 (`feature/usaa-mailcenter`, commit `aef3b93`) replaced the `omem` entry
+with `mailcenter`:
 
 ```diff
 -    'usaa.customer.service@omem.usaa.com': 'USAA',
 +    'usaa.customer.service@mailcenter.usaa.com': 'USAA',
 ```
 
-That merge left four tests failing on a clean `main` checkout, so the `tests`
-CI check did not gate it. More importantly, if USAA still sends card purchase
-alerts from `omem`, that swap silently stopped them importing — a rejected
-sender produces no error, only a growing Import Issues tab.
+**The swap itself is correct** — USAA has retired `omem`, confirmed by the
+repository owner. But the PR changed only `APP_CONFIG`, leaving four tests
+failing on a clean `main` checkout (so the `tests` check did not gate the
+merge) and a `README.md` still advertising the dead address.
 
-This design already called for listing both addresses, which resolves the
-regression either way: if `omem` is retired the entry never matches and costs
-nothing; if it is live, purchase alerts keep working. Restoring it also fixes
-three of the four failing tests without any test edit.
+This design therefore drops `omem` everywhere rather than listing both, and
+carries the change through all five places the address appears: the config,
+`tests/import-toggles.test.js`, `tests/chase-purchase.test.js`,
+`tests/usaa.test.js`, and the README sender table.
 
 ## Format
 
@@ -82,22 +82,26 @@ changes are fixture-driven. Deposit alerts continue to go to Needs Review.
 
 ### 1. Sender (`Config.gs`)
 
-List both exact addresses against the same institution, restoring the entry
-PR #17 removed:
+One exact address, with `omem` retired and removed:
 
 ```js
-'usaa.customer.service@omem.usaa.com':       'USAA',
 'usaa.customer.service@mailcenter.usaa.com': 'USAA',
 ```
 
-This is a second entry, **not a looser match** — the check stays exact-address.
-`LESSONS.md` ("Never widen the sender allowlist to make a parser work")
-prescribes exactly this: fix the sender entry rather than relax the comparison.
+This is a corrected entry, **not a looser match** — the check stays
+exact-address. `LESSONS.md` ("Never widen the sender allowlist to make a parser
+work") prescribes exactly this: fix the sender entry rather than relax the
+comparison.
 
 `trustedInstitution_` lowercases both sides, so the capitalized real-world
-spelling matches. `enabledTrustedSenders_` maps per address but gates on the
-institution, so both addresses ride the existing `Import USAA` toggle and no
-new Setup row is needed.
+spelling matches, and no new Setup row is needed — the address rides the
+existing `Import USAA` toggle.
+
+The stale references PR #17 left behind are fixed here: the enabled-sender key
+set and query assertions in `tests/import-toggles.test.js`, the
+case-insensitivity test and lookalike list in `tests/chase-purchase.test.js`
+(the lookalikes are re-pointed at `mailcenter`, since a lookalike of an
+untrusted address no longer tests anything), and the README sender table.
 
 ### 2. Routing (`Parsers.gs`)
 
@@ -169,13 +173,14 @@ point.
 - plain-body path imports with all fields correct
 - HTML-only path (empty plain part) imports, including the newline-split name
 - missing `Date:` → `needs_review`
-- lookalike sender (`...@mailcenter.usaa.com.example.net`) rejected
+- lookalike senders (`...@mailcenter.usaa.com.example.net` and friends) rejected
 - the existing purchase format still imports through the new router
 
 `tests/import-toggles.test.js` asserts the full enabled-sender key set with
-`deepStrictEqual`; that expected set gains the second address. Its other two
-USAA assertions, and the case-insensitivity test in `chase-purchase.test.js`,
-start passing again as soon as `omem` is restored.
+`deepStrictEqual`; that expected set, its other USAA assertions, and the
+case-insensitivity and lookalike tests in `chase-purchase.test.js` all move to
+`mailcenter`. The retired `omem` address is added to the lookalike-rejection
+list so there is a standing assertion that it stays untrusted.
 
 ### 6. Version and docs
 

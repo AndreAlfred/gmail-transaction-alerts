@@ -37,12 +37,12 @@
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
   parserVersion: '1.6.0',
-  // USAA sends from more than one subdomain: card purchase alerts have come
-  // from omem, bank-account alerts from mailcenter. Both are listed so neither
-  // is silently rejected. Entries are matched as exact addresses -- adding one
-  // is the supported fix for a rejected sender; loosening the comparison is not.
+  // USAA now sends from mailcenter; the older omem subdomain is retired and
+  // was removed deliberately. Entries are matched as exact addresses -- adding
+  // or correcting one is the supported fix for a rejected sender; loosening the
+  // comparison is not. The address is also referenced from README.md and three
+  // test files, so grep for it before changing it here.
   trustedSenders: Object.freeze({
-    'usaa.customer.service@omem.usaa.com': 'USAA',
     'usaa.customer.service@mailcenter.usaa.com': 'USAA',
     'no.reply.alerts@chase.com': 'Chase',
     'venmo@venmo.com': 'Venmo'

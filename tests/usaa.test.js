@@ -37,7 +37,7 @@ const fixture = (name) =>
   fs.readFileSync(path.resolve(__dirname, '..', 'fixtures', name), 'utf8');
 
 const BANK_SENDER = 'USAA <USAA.Customer.Service@mailcenter.usaa.com>';
-const CARD_SENDER = 'USAA <USAA.customer.service@omem.usaa.com>';
+const CARD_SENDER = 'USAA <USAA.customer.service@mailcenter.usaa.com>';
 
 const DEBIT_SUBJECT = 'Debit Alert for Your USAA Bank Account';
 const DEBIT_PLAIN = fixture('usaa-account-debit-alert.txt');

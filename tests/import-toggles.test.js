@@ -67,10 +67,8 @@ test('missing Import rows default each institution to enabled', () => {
   assert.strictEqual(ctx.isInstitutionEnabled_('Chase'), true);
   assert.strictEqual(ctx.isInstitutionEnabled_('Venmo'), true);
   const senders = ctx.enabledTrustedSenders_();
-  // USAA has two addresses; both ride the single Import USAA toggle.
   assert.deepStrictEqual(Object.keys(senders).sort(), [
     'no.reply.alerts@chase.com',
-    'usaa.customer.service@omem.usaa.com',
     'usaa.customer.service@mailcenter.usaa.com',
     'venmo@venmo.com'
   ].sort());
@@ -84,7 +82,6 @@ test('enabledTrustedSenders_ drops Chase when Import Chase is FALSE', () => {
   ]);
   const senders = ctx.enabledTrustedSenders_();
   assert.strictEqual(senders['no.reply.alerts@chase.com'], undefined);
-  assert.strictEqual(senders['usaa.customer.service@omem.usaa.com'], 'USAA');
   assert.strictEqual(senders['usaa.customer.service@mailcenter.usaa.com'], 'USAA');
   assert.strictEqual(senders['venmo@venmo.com'], 'Venmo');
   assert.strictEqual(ctx.isInstitutionEnabled_('Chase'), false);
@@ -103,7 +100,6 @@ test('buildGmailQuery_ excludes disabled senders', () => {
     ['Import Venmo', false]
   ]);
   const q = ctx.buildGmailQuery_();
-  assert.match(q, /from:usaa\.customer\.service@omem\.usaa\.com/);
   assert.match(q, /from:usaa\.customer\.service@mailcenter\.usaa\.com/);
   assert.doesNotMatch(q, /from:no\.reply\.alerts@chase\.com/);
   assert.doesNotMatch(q, /from:venmo@venmo\.com/);

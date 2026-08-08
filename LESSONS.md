@@ -94,11 +94,15 @@ Credit merchant and amount also appear in the subject line; debit amount appears
 
 The allowlist is a security boundary, not a convenience. A lookalike sender (`alerts@chase.com.example.net`) must be rejected even when the message body parses perfectly — there is a test asserting exactly this. If a legitimate email is being rejected, fix the sender entry, don't loosen the match.
 
-### One institution can send from several subdomains — add an address, never swap one
+### A trusted sender address lives in five places, and changing one is not enough
 
-USAA sends card purchase alerts from `omem.usaa.com` and bank-account alerts from `mailcenter.usaa.com`. A PR that needed the second one **replaced** the first instead of adding it. Nothing in the product surfaces that: an unlisted sender isn't an error, it's an "Untrusted sender" row in Import Issues, so purchase alerts simply stop appearing and the failure looks like "nothing is importing." Four tests were left failing on `main`, which also means the merge went in without the `tests` check passing.
+USAA migrated from `omem.usaa.com` to `mailcenter.usaa.com`. The PR that made that change edited `APP_CONFIG.trustedSenders` and nothing else, which left `main` with four failing tests and a `README.md` still advertising the dead address. The merge went in regardless, so the `tests` check was not enforced at the time.
 
-`trustedSenders` is a map of address → institution, and `enabledTrustedSenders_` keys on the address while gating on the institution, so several addresses for one institution work correctly and share that institution's Setup toggle. Adding an address is cheap and reversible; removing one is a silent data-loss regression. Unless you have positive evidence an address is retired, keep it — a dead entry costs nothing because it simply never matches.
+The address is referenced from `APP_CONFIG.trustedSenders`, `tests/import-toggles.test.js` (a `deepStrictEqual` on the whole enabled-sender key set, plus a query-string match), `tests/chase-purchase.test.js` (the case-insensitivity test and the lookalike-rejection list), `tests/usaa.test.js`, and the `README.md` sender table. **Grep for the address before changing it** rather than editing the config alone.
+
+Two things make this expensive to notice. An unlisted sender is not an error — it produces an "Untrusted sender" row in Import Issues, so affected alerts simply stop appearing and the symptom reads as "nothing is importing." And the lookalike-rejection tests keep passing after a botched swap, because a lookalike of a *no-longer-trusted* address is still correctly rejected; they stop testing anything useful without going red.
+
+`trustedSenders` maps address → institution and `enabledTrustedSenders_` keys on the address while gating on the institution, so listing several addresses for one institution does work correctly and they share that institution's Setup toggle. Retiring an address is still the right call once you have positive evidence it is dead — just carry the change through every reference.
 
 ---
 
