@@ -28,7 +28,7 @@ One branch per change, named for what it does. Run the full test suite before pu
 **Quick reference**
 
 - Tests: `node --test tests/*.test.js` (run them all; several suites exist)
-- Authoritative source: `gmail-transaction-alerts-Code.gs`; regenerate the `.txt` copy after every change (`cp gmail-transaction-alerts-Code.gs gmail-transaction-alerts-Code.txt`)
+- Authoritative source: `gmail-transaction-alerts-Code.gs`
 - Never commit real alert emails, real merchant/amount pairs, real card digits, live message IDs, or personal names — fixtures must be synthetic
 - Never widen the trusted-sender allowlist to make a parser pass
 - Never reintroduce a literal column index into the sheet write path
@@ -142,12 +142,6 @@ The file keeps the original module boundaries as `// ===== appsscript/X.gs =====
 | `Triggers.gs` | Time-driven trigger install/remove |
 | `Menu.gs` | Menu, Diagnostics, and user-invoked commands |
 
-`gmail-transaction-alerts-Code.txt` is a **byte-identical** copy for devices that won't open a `.gs`. CI enforces this. Regenerate it in the same commit as any script change:
-
-```bash
-cp gmail-transaction-alerts-Code.gs gmail-transaction-alerts-Code.txt
-```
-
 **Runtime:** the script requires the **V8** Apps Script runtime — it uses `padStart` and `Number.isFinite`, neither of which exists under legacy Rhino. New Apps Script projects default to V8.
 
 ## Gmail disposition labels
@@ -195,9 +189,8 @@ Parser changes should be fixture-driven and test-first:
    There is no `package.json` and no `npm test` — Node's built-in runner is the whole harness. Pass explicit paths or a glob; a bare directory argument is treated as a module and throws.
 6. Change only the relevant parser in the `Parsers.gs` section.
 7. Re-run the full suite.
-8. `cp gmail-transaction-alerts-Code.gs gmail-transaction-alerts-Code.txt`
-9. Bump `parserVersion` — see **Releasing and versioning** below.
-10. Test against the real Gmail message in a disposable private spreadsheet.
+8. Bump `parserVersion` — see **Releasing and versioning** below.
+9. Test against the real Gmail message in a disposable private spreadsheet.
 
 Do not loosen sender checks or write one broad regex that mixes banks and message types.
 
@@ -210,13 +203,13 @@ Two CI checks gate every PR to `main`, and both must pass:
 | Check | Requires |
 |---|---|
 | `tests` | `node --test tests/*.test.js` passes |
-| `version-check` | `.gs` and `.txt` **byte-identical**, and `parserVersion` bumped whenever either changes |
+| `version-check` | `parserVersion` bumped whenever `gmail-transaction-alerts-Code.gs` changes |
 
 | Change | Bump |
 |---|---|
 | Parser behavior, new alert type, sheet write semantics | minor (major if the sheet column contract breaks) |
 | Bug fix preserving behavior | patch |
-| Docs, CI, or tests only — no `.gs` / `.txt` change | none |
+| Docs, CI, or tests only — no `.gs` change | none |
 
 If you branched before someone else merged, **resolve the version forward** rather than taking either side: a branch at `1.3.0` merging a `main` at `1.4.0` becomes `1.5.0`, not one of the two. Taking either side silently discards a release.
 

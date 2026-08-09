@@ -146,7 +146,7 @@ On Node 25 a bare directory argument is resolved as a module and throws `MODULE_
 
 ### Duplicated files drift
 
-`gmail-transaction-alerts-Code.txt` exists only so the script can be opened on an iPad, and it is a byte-identical copy of the `.gs`. The same applies to `AGENTS.md` and `CLAUDE.md`. Any duplicate is a drift hazard: name one copy authoritative, and regenerate the others as a required step of every change rather than editing them in parallel.
+`AGENTS.md` and `CLAUDE.md` are byte-identical copies (different tools look for different filenames). Any duplicate is a drift hazard: name one copy authoritative, and regenerate the other as a required step of every change rather than editing them in parallel.
 
 ### Verify from the location you'll actually ship from
 

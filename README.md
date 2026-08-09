@@ -24,12 +24,6 @@ Anything else from a trusted sender is routed to an **Import Issues** sheet and 
 
 On the **Setup** sheet, `Import USAA`, `Import Chase`, and `Import Venmo` default to `TRUE`. Set any to `FALSE` to pause that institution without labeling its mail; turning it back on resumes import within the usual 30-day search window.
 
-`gmail-transaction-alerts-Code.txt` is a byte-identical copy of the `.gs`, for devices that won't open a `.gs` file. Regenerate it after any change:
-
-```bash
-cp gmail-transaction-alerts-Code.gs gmail-transaction-alerts-Code.txt
-```
-
 Apps Script has no Gmail-arrival trigger, so this polls on a time-driven trigger (1/5/10/15/30/60 minutes). Google does not guarantee exact execution times.
 
 ## Adding your own columns
@@ -58,14 +52,13 @@ Fixtures are synthetic. **Never commit a real alert email, real merchant/amount 
 
 ## Releasing
 
-The release version is `APP_CONFIG.parserVersion` in `gmail-transaction-alerts-Code.gs` (must match the `.txt` copy). Tags and GitHub Releases use `{parserVersion}` with no `v` prefix (e.g. `1.1.0`).
+The release version is `APP_CONFIG.parserVersion` in `gmail-transaction-alerts-Code.gs`. Tags and GitHub Releases use `{parserVersion}` with no `v` prefix (e.g. `1.1.0`).
 
-**When you change the script** (`.gs` / `.txt`):
+**When you change the script** (`.gs`):
 
 1. Bump `parserVersion` in the `.gs` file.
-2. `cp gmail-transaction-alerts-Code.gs gmail-transaction-alerts-Code.txt` (CI requires the two files to be **byte-identical**, not merely the same version string).
-3. Open a PR to `main`. CI fails if the version is still the same as `main`, or if the two files differ in any byte.
-4. After merge, the release workflow creates tag `X.Y.Z` (if new) and a GitHub Release whose **Changes** section is the PR description (falls back to GitHub-generated notes if the body is empty). It runs on merged PR close, or manual **Run workflow** (`workflow_dispatch`) — **not** on direct pushes to `main`, which the branching rule forbids anyway. Re-runs are safe: an existing tag is skipped.
+2. Open a PR to `main`. CI fails if the version is still the same as `main`.
+3. After merge, the release workflow creates tag `X.Y.Z` (if new) and a GitHub Release whose **Changes** section is the PR description (falls back to GitHub-generated notes if the body is empty). It runs on merged PR close, or manual **Run workflow** (`workflow_dispatch`) — **not** on direct pushes to `main`, which the branching rule forbids anyway. Re-runs are safe: an existing tag is skipped.
 
    Because the release notes are your PR description, **write the PR body as the changelog entry it becomes.**
 
@@ -73,7 +66,7 @@ The release version is `APP_CONFIG.parserVersion` in `gmail-transaction-alerts-C
 |---|---|
 | Parser behavior / new alert type / sheet write semantics | minor (major if the sheet column contract breaks) |
 | Bug fix preserving behavior | patch |
-| Docs / CI / tests only (no `.gs` / `.txt`) | no bump |
+| Docs / CI / tests only (no `.gs` change) | no bump |
 
 CI does not edit the version for you. An advisory PR comment may suggest patch/minor/major when script files change.
 
