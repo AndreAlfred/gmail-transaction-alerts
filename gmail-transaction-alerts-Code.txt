@@ -21,6 +21,10 @@
  *   import stops with an error naming it instead of writing to the wrong place.)
  *
  * NOTES
+ *   USAA bank-account debit alerts have no merchant, so Merchant is the fixed
+ *   label "USAA Bank Debit"; Card Type is "bank debit" and Event Type is
+ *   account_debit. Account deposit alerts are not supported yet and go to
+ *   Needs Review.
  *   Chase and Venmo alerts do not include a cardholder name, so that cell is
  *   blank on those rows. Chase outbound transfers use Card Type "transfer"
  *   and Event Type transfer_out; Merchant is the recipient. Venmo amounts are
@@ -32,7 +36,12 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.5.1',
+  parserVersion: '1.6.0',
+  // USAA now sends from mailcenter; the older omem subdomain is retired and
+  // was removed deliberately. Entries are matched as exact addresses -- adding
+  // or correcting one is the supported fix for a rejected sender; loosening the
+  // comparison is not. The address is also referenced from README.md and three
+  // test files, so grep for it before changing it here.
   trustedSenders: Object.freeze({
     'usaa.customer.service@mailcenter.usaa.com': 'USAA',
     'no.reply.alerts@chase.com': 'Chase',
@@ -140,7 +149,53 @@ function parseAlert(sender, subject, htmlBody, plainBody) {
   return { outcome: 'needs_review', institution: institution, reason: 'Unsupported institution' };
 }
 
+// USAA sends two alert shapes. Card purchases name a merchant; bank-account
+// debits do not. Routing is on the account-debit wording rather than the
+// subject because only the body is available here, and anything unrecognized
+// still falls through to the purchase parser and on to review.
 function parseUsaa_(text) {
+  if (/came out of your account ending in/i.test(text)) return parseUsaaAccountDebit_(text);
+  return parseUsaaPurchase_(text);
+}
+
+// The security-zone header carries the account holder's name between the
+// "USAA SECURITY ZONE" banner and the "USAA # ending in" line. In HTML the
+// first and last name are separated by <br />, so they arrive on separate
+// lines; the plain part puts them on one. Best effort by design: a reshaped
+// header yields an empty Cardholder rather than failing an otherwise complete
+// alert. The name is omitted when absent, never guessed.
+function usaaSecurityZoneName_(text) {
+  var m = String(text).match(/USAA SECURITY ZONE\s*([\s\S]*?)\s*USAA\s*#\s*ending\s+in\s*:?\s*\d{4}/i);
+  return m ? m[1].replace(/\s+/g, ' ').trim() : '';
+}
+
+// Bank-account debit alert, subject "Debit Alert for Your USAA Bank Account".
+// Body reads "$88.45 came out of your account ending in 7788." with To: and
+// Date: as two-cell table rows, so label and value land on consecutive lines
+// after htmlToText_ -- the Date regex bridges that with \s*.
+//
+// There is no merchant on this alert type. The only descriptive field is the
+// To: destination, which is the constant "USAA DEBIT", so Merchant is a fixed
+// label rather than a parsed value. The To: row is deliberately not required:
+// its value is unused, so requiring it would add a failure mode without adding
+// data. Amount stays positive and direction lives in Event Type, matching
+// Chase transfers and Venmo receipts. Card Type is "bank debit", not "debit",
+// because Chase debit-card purchases already use "debit".
+function parseUsaaAccountDebit_(text) {
+  var debit = text.match(/(\$[\d,]+(?:\.\d{2})?)\s+came out of your account ending in\s+(\d{4})/i);
+  var date = text.match(/Date\s*:\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+  if (!debit || !date) return { outcome: 'needs_review', institution: 'USAA', reason: 'Unsupported or incomplete USAA account alert' };
+  var parsedDate = parseUsDate_(date[1]);
+  var amount = parseAmount_(debit[1]);
+  if (!parsedDate || !Number.isFinite(amount)) return { outcome: 'needs_review', institution: 'USAA', reason: 'Invalid USAA date or amount' };
+  return { outcome: 'imported', transaction: {
+    transactionDate: parsedDate, institution: 'USAA', cardType: 'bank debit',
+    last4: debit[2], cardholder: usaaSecurityZoneName_(text), merchant: 'USAA Bank Debit',
+    amount: amount, eventType: 'account_debit'
+  }};
+}
+
+function parseUsaaPurchase_(text) {
   var charge = text.match(/Your\s+(.+?)\s+\.{3}\s*(\d{4})\s+was charged\s+(\$[\d,]+(?:\.\d{2})?)\s+at\s+(.+?)(?=\n\s*Date\s*:)/i);
   var date = text.match(/Date\s*:\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
   var holder = text.match(/Cardholder\s*name\s*:\s*([^\n]+)/i);

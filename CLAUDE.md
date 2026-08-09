@@ -57,7 +57,8 @@ The active implementation deliberately avoids SimpleFIN, Plaid, external servers
 
 The script searches Gmail for messages from these exact trusted senders:
 
-- USAA: `USAA.customer.service@omem.usaa.com`
+- USAA: `USAA.Customer.Service@mailcenter.usaa.com`
+  (USAA moved off the older `omem` subdomain; it is retired and intentionally not listed)
 - Chase: `no.reply.alerts@chase.com`
 - Venmo: `venmo@venmo.com`
 
@@ -71,9 +72,10 @@ Current parser coverage:
 4. **Chase outbound transfers** to another bank/account, e.g. subject `You sent $250.00 from account ending in (…5678)`. Field labels: Account ending in / Sent on / Recipient / Amount. Merchant is the recipient (headline fallback: `You sent $… to RECIPIENT`). Card Type is `transfer`; Event Type is `transfer_out`. Amount is positive.
 5. **Chase scheduled credit-card payments**, which are recognized but intentionally ignored because they are not merchant purchases.
 6. **Venmo P2P payments** you sent (`You paid NAME $X.XX`) and **payments received** (`NAME paid you $X.XX`). Merchant is the counterparty. Card Type is `payment` or `received`. Amount is always positive; Event Type distinguishes direction (`venmo_payment` / `venmo_payment_received`). Payment alerts may carry Last 4 from `Payment Method` (`account ending in ####`); received alerts leave Last 4 blank. Other Venmo mail goes to Needs Review.
-7. Other trusted-sender formats are sent to **Import Issues** and labeled **Needs Review** rather than silently discarded.
+7. **USAA bank-account debit alerts**, subject `Debit Alert for Your USAA Bank Account`, wording `$X came out of your account ending in NNNN.` followed by To: and Date: rows. There is no merchant, so Merchant is the fixed label `USAA Bank Debit` and the To: destination (`USAA DEBIT`) is discarded. Card Type is `bank debit` — not `debit`, which Chase debit-*card* purchases already use. Event Type is `account_debit`; amount is positive. Cardholder is read from the security-zone header on a best-effort basis and left blank if that header changes shape. Account **deposit** alerts are not yet supported and go to Needs Review.
+8. Other trusted-sender formats are sent to **Import Issues** and labeled **Needs Review** rather than silently discarded.
 
-Chase credit, debit, and transfer alerts all render fields as nested two-cell HTML table rows. After `htmlToText_`, the label and value often land on consecutive lines (source newlines between `</td>` and `<td>`), so parsers bridge with `\s*` rather than requiring `Label Value` on one line. **Chase and Venmo alerts carry no cardholder name**, so that column is left empty rather than fabricated.
+Chase credit, debit, and transfer alerts all render fields as nested two-cell HTML table rows. After `htmlToText_`, the label and value often land on consecutive lines (source newlines between `</td>` and `<td>`), so parsers bridge with `\s*` rather than requiring `Label Value` on one line. **Chase and Venmo alerts carry no cardholder name**, so that column is left empty rather than fabricated. USAA bank-account alerts use the same two-cell layout for To: and Date:, and carry the holder's name in the security-zone header — split across `<br />` in HTML, so any pattern for it must tolerate a newline.
 
 The Transactions sheet contains:
 
@@ -226,6 +228,7 @@ Test suites live in `tests/`, one per institution plus two for sheet behavior:
 
 | Suite | Covers |
 |---|---|
+| `usaa.test.js` | USAA account debits (plain and HTML paths), purchase authorizations, sender allowlist |
 | `chase-purchase.test.js` | Chase credit and debit purchases, subject fallbacks, sender allowlist |
 | `chase-transfer.test.js` | Chase outbound transfers |
 | `venmo.test.js` | Venmo sent/received, HTML-over-plain body selection |
