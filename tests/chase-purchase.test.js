@@ -177,7 +177,7 @@ test('month-name dates parse across abbreviations', () => {
 test('trusted sender matching is case-insensitive on both sides', () => {
   // A user editing the config is likely to paste the capitalized spelling used
   // in the docs. That must still match the lowercased incoming From header.
-  const upper = 'USAA.Customer.Service@OMEM.USAA.COM';
+  const upper = 'USAA.Customer.Service@MAILCENTER.USAA.COM';
   const usaaBody = [
     'Your credit card ...4321 was charged $7.56 at SAMPLE*COFFEE SHOP.',
     'Date: 3/7/2026',
@@ -190,9 +190,10 @@ test('trusted sender matching is case-insensitive on both sides', () => {
 
 test('case-insensitivity does not weaken the allowlist', () => {
   // Still an exact-address check: no substring or domain matching.
-  ['usaa.customer.service@omem.usaa.com.example.net',
-   'evil-usaa.customer.service@omem.usaa.com',
-   'omem.usaa.com',
+  ['usaa.customer.service@mailcenter.usaa.com.example.net',
+   'evil-usaa.customer.service@mailcenter.usaa.com',
+   'mailcenter.usaa.com',
+   'usaa.customer.service@omem.usaa.com',
    'someone@usaa.com'].forEach((sender) => {
     assert.strictEqual(parseAlert(sender, 'Purchase', '', '').outcome, 'needs_review');
     assert.strictEqual(parseAlert(sender, 'Purchase', '', '').reason, 'Untrusted sender');
