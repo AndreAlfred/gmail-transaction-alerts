@@ -100,7 +100,7 @@ jobs:
             "" \
             "Parser version: \`$VERSION\` (\`APP_CONFIG.parserVersion\`)." \
             "" \
-            "Install by pasting [\`gmail-transaction-alerts-Code.gs\`](https://github.com/${{ github.repository }}/blob/${TAG}/gmail-transaction-alerts-Code.gs) into Apps Script \`Code.gs\` (or use the identical [\`.txt\`](https://github.com/${{ github.repository }}/blob/${TAG}/gmail-transaction-alerts-Code.txt) copy)." \
+            "Install by pasting [\`gmail-transaction-alerts-Code.gs\`](https://github.com/${{ github.repository }}/blob/${TAG}/gmail-transaction-alerts-Code.gs) into Apps Script \`Code.gs\`." \
             "" \
             "### Changes" \
             "")
