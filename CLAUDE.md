@@ -73,8 +73,9 @@ Current parser coverage:
 5. **Chase Zelle money received**, subject `You received money with Zelle®`, headline `NAME sent you money`. Field labels: Amount / Sent on / Transaction number / Memo. Merchant is the sender's name, taken from the headline — there is no Sender or From row. Card Type is `zelle`; Event Type is `zelle_received`; amount is positive. This alert carries **no account number**, so Last 4 is blank. Memo is deliberately not read.
 6. **Chase scheduled credit-card payments**, which are recognized but intentionally ignored because they are not merchant purchases.
 7. **Venmo P2P payments** you sent (`You paid NAME $X.XX`) and **payments received** (`NAME paid you $X.XX`). Merchant is the counterparty. Card Type is `payment` or `received`. Amount is always positive; Event Type distinguishes direction (`venmo_payment` / `venmo_payment_received`). Payment alerts may carry Last 4 from `Payment Method` (`account ending in ####`); received alerts leave Last 4 blank. Other Venmo mail goes to Needs Review.
-8. **USAA bank-account debit alerts**, subject `Debit Alert for Your USAA Bank Account`, wording `$X came out of your account ending in NNNN.` followed by To: and Date: rows. There is no merchant, so Merchant is the fixed label `USAA Bank Debit` and the To: destination (`USAA DEBIT`) is discarded. Card Type is `bank debit` — not `debit`, which Chase debit-*card* purchases already use. Event Type is `account_debit`; amount is positive. Cardholder is read from the security-zone header on a best-effort basis and left blank if that header changes shape. Account **deposit** alerts are not yet supported and go to Needs Review.
-9. Other trusted-sender formats are sent to **Import Issues** and labeled **Needs Review** rather than silently discarded.
+8. **USAA bank-account debit alerts**, subject `Debit Alert for Your USAA Bank Account`, wording `$X came out of your account ending in NNNN.` followed by To: and Date: rows. There is no merchant, so Merchant is the fixed label `USAA Bank Debit` and the To: destination (`USAA DEBIT`) is discarded. Card Type is `bank debit` — not `debit`, which Chase debit-*card* purchases already use. Event Type is `account_debit`; amount is positive. Cardholder is read from the security-zone header on a best-effort basis and left blank if that header changes shape.
+9. **USAA bank-account deposit alerts**, subject `Deposit to Your Bank Account`, wording `You received a deposit of $X to your account …NNNN.` followed by From:, To:, Date:, and Amount: rows. There is no merchant, so Merchant is the fixed label `USAA Deposit` and the From: origin (`USAA CREDIT`) is discarded. Card Type is `deposit` and Event Type is `deposit`; amount is positive, with direction carried by Event Type as with debits and Chase transfers. The account number is masked with an ellipsis — a literal `...` in the plain part, the `&#x2026;` entity in HTML — so the last-4 pattern accepts both. Cardholder comes from the same best-effort security-zone header as the debit alert.
+10. Other trusted-sender formats are sent to **Import Issues** and labeled **Needs Review** rather than silently discarded.
 
 Chase credit, debit, and transfer alerts all render fields as nested two-cell HTML table rows. After `htmlToText_`, the label and value often land on consecutive lines (source newlines between `</td>` and `<td>`), so parsers bridge with `\s*` rather than requiring `Label Value` on one line. **Chase and Venmo alerts carry no cardholder name**, so that column is left empty rather than fabricated. USAA bank-account alerts use the same two-cell layout for To: and Date:, and carry the holder's name in the security-zone header — split across `<br />` in HTML, so any pattern for it must tolerate a newline.
 
@@ -218,11 +219,11 @@ After merge, the release workflow tags the version and publishes a release whose
 
 ## Verification
 
-Test suites live in `tests/`, one per institution plus two for sheet behavior:
+Test suites live in `tests/`, one per institution plus two for sheet behavior and one for the CI version gate:
 
 | Suite | Covers |
 |---|---|
-| `usaa.test.js` | USAA account debits (plain and HTML paths), purchase authorizations, sender allowlist |
+| `usaa.test.js` | USAA account debits and deposits (plain and HTML paths), purchase authorizations, sender allowlist |
 | `chase-purchase.test.js` | Chase credit and debit purchases, subject fallbacks, sender allowlist |
 | `chase-transfer.test.js` | Chase outbound transfers |
 | `chase-zelle.test.js` | Chase Zelle receipts, routing away from the transfer parser |
@@ -230,6 +231,7 @@ Test suites live in `tests/`, one per institution plus two for sheet behavior:
 | `import-issues.test.js` | Issue row contents, header migration, formula neutralization |
 | `import-toggles.test.js` | Per-institution Setup toggles and query filtering |
 | `sheet-append.test.js` | Append anchor, manual rows, column mapping |
+| `version-compare.test.js` | The CI parserVersion gate (`.github/scripts/compare-parser-versions.js`) |
 
 Do not maintain a list of individual test names here — it rots faster than anyone updates it. Read the suite.
 
