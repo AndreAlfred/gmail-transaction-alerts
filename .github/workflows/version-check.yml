@@ -112,17 +112,14 @@ jobs:
               -f body="$BODY" >/dev/null
           fi
 
+      # Requires parserVersion to be strictly GREATER than main's, not merely
+      # different. An equality check passes a branch carrying an older version,
+      # which downgrades the release and mis-stamps the Parser Version audit
+      # column. See .github/scripts/compare-parser-versions.js and
+      # tests/version-compare.test.js.
       - name: Require version bump when script changes
         if: steps.changes.outputs.script_changed == 'true'
         env:
           PR_VER: ${{ steps.pr_version.outputs.version }}
           MAIN_VER: ${{ steps.main_version.outputs.version }}
-        run: |
-          if [ "$PR_VER" = "$MAIN_VER" ]; then
-            echo "::error::APP_CONFIG.parserVersion is still $MAIN_VER (same as main)."
-            echo "This PR changes gmail-transaction-alerts-Code.gs, so you must bump parserVersion."
-            echo "Edit parserVersion in gmail-transaction-alerts-Code.gs."
-            echo "Bump guide: patch for bugfixes, minor for new parsers/behavior, major for breaking sheet contracts."
-            exit 1
-          fi
-          echo "Version bumped: $MAIN_VER → $PR_VER"
+        run: node .github/scripts/compare-parser-versions.js "$PR_VER" "$MAIN_VER"
