@@ -217,7 +217,7 @@ After merge, the release workflow tags the version and publishes a release whose
 
 ## Verification
 
-Test suites live in `tests/`, one per institution plus two for sheet behavior:
+Test suites live in `tests/`, one per institution plus two for sheet behavior and one for the CI version gate:
 
 | Suite | Covers |
 |---|---|
@@ -228,6 +228,7 @@ Test suites live in `tests/`, one per institution plus two for sheet behavior:
 | `import-issues.test.js` | Issue row contents, header migration, formula neutralization |
 | `import-toggles.test.js` | Per-institution Setup toggles and query filtering |
 | `sheet-append.test.js` | Append anchor, manual rows, column mapping |
+| `version-compare.test.js` | The CI parserVersion gate (`.github/scripts/compare-parser-versions.js`) |
 
 Do not maintain a list of individual test names here — it rots faster than anyone updates it. Read the suite.
 
