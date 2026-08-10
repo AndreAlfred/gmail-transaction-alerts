@@ -2,7 +2,7 @@
 'use strict';
 
 /**
- * Extract APP_CONFIG.parserVersion from a Code.gs / Code.txt file.
+ * Extract APP_CONFIG.parserVersion from a Code.gs file.
  * Usage: node extract-parser-version.js <path>
  * Prints the semver string to stdout, or exits 1 with a message on stderr.
  */

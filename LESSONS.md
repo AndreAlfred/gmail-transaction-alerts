@@ -152,9 +152,11 @@ On Node 25 a bare directory argument is resolved as a module and throws `MODULE_
 
 ## Repository hygiene
 
-### Duplicated files drift
+### Duplicated files drift, and the cost outlives the reason
 
-`gmail-transaction-alerts-Code.txt` exists only so the script can be opened on an iPad, and it is a byte-identical copy of the `.gs`. The same applies to `AGENTS.md` and `CLAUDE.md`. Any duplicate is a drift hazard: name one copy authoritative, and regenerate the others as a required step of every change rather than editing them in parallel.
+`AGENTS.md` and `CLAUDE.md` are byte-identical copies, kept that way because different tools look for different filenames. Any duplicate is a drift hazard: name one copy authoritative, and regenerate the others as a required step of every change rather than editing them in parallel.
+
+The repository used to carry a second such duplicate, `gmail-transaction-alerts-Code.txt`, a byte-identical copy of the `.gs` so the script could be opened on an iPad. It was removed once that convenience stopped being worth the upkeep. Its removal is a useful case study: a duplicate is load-bearing in more places than the file list suggests — `version-check.yml` diffed the two files and read the version out of both, `release.yml` linked to the `.txt` in every release note, and four Markdown files documented the `cp` step. **Deleting a duplicate means retiring the machinery that enforced it, in the same change.** Removing only the file leaves CI failing on a path that no longer exists.
 
 ### Verify from the location you'll actually ship from
 
