@@ -58,8 +58,8 @@ function main(argv) {
 
   if (ordering === 0) {
     console.error(`::error::APP_CONFIG.parserVersion is still ${mainVersion} (same as main).`);
-    console.error('This PR changes gmail-transaction-alerts-Code.gs and/or .txt, so you must bump parserVersion.');
-    console.error('Edit parserVersion in the .gs file, then: cp gmail-transaction-alerts-Code.gs gmail-transaction-alerts-Code.txt');
+    console.error('This PR changes gmail-transaction-alerts-Code.gs, so you must bump parserVersion.');
+    console.error('Edit parserVersion in gmail-transaction-alerts-Code.gs.');
     console.error('Bump guide: patch for bugfixes, minor for new parsers/behavior, major for breaking sheet contracts.');
     return 1;
   }
