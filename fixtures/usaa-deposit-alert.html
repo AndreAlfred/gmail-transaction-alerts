@@ -1,0 +1,26 @@
+<!--
+  Synthetic USAA bank-account deposit alert (the text/html MIME part).
+  Structure and field labels mirror a real alert from
+  USAA.Customer.Service@mailcenter.usaa.com. All values are fictitious.
+
+  Subject: Deposit to Your Bank Account
+
+  Structural quirks preserved on purpose:
+    - the account holder's first and last name are split by <br />, so after
+      htmlToText_ they land on separate lines, same as the debit alert
+    - the account number in the headline is masked with the HTML entity
+      &#x2026; (an ellipsis), not the literal "..." the debit alert uses
+    - amount and last 4 sit in separate <SPAN class="DLSVAR"> nodes
+    - From: / To: / Date: / Amount: are two-cell table rows, so label and
+      value land on consecutive lines after htmlToText_
+-->
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1"></head>	<body lang="EN-US" link="blue" vlink="purple"><div align="center"><table cellspacing="0" cellpadding="0" border="0" width="650"><tr height="90"><td width="600"><table cellspacing="0" cellpadding="0" border="0" width="613"><tr><td width="489" height="45" align="right"><table width="188" height="65" cellpadding="0" cellspacing="0" border="0" align="right" valign="right"><tr><td bgcolor="#ffffff" align="left"><table width="100%" height="65" border="0" cellspacing="0" cellpadding="5"><tr><td valign="middle" align="left"><font face="Arial, Helvetica, sans-serif" style="font-size: 10px; color: #00365b"><strong>USAA SECURITY ZONE</strong></font> <br><font face="Arial, Helvetica, sans-serif" style="font-size: 9px; color: #00365b">Casey</font><br /><font face="Arial, Helvetica, sans-serif" style="font-size: 9px; color: #00365b">Rivers</font><br /><font face="Arial, Helvetica, sans-serif" style="font-size: 9px; color: #00365b">USAA # ending in:5566</font></td></tr></table></td></tr></table></td></tr></table></td></tr></table>
+<tr><td width="600" bgcolor="#FFFFFF"><br/><font face="Arial, sans-serif" style="color: #12395b; font-size: 18px;"><B>Hi Casey,</B><br/><br/></font></td></tr>
+<tr><td width="600" bgcolor="#FFFFFF"><font face="Arial"><DIV class="Section1"><DIV><P class="normal"><B><SPAN style="color:#12395b;font-family:'Arial';font-size:14pt">You received a deposit of <SPAN><SPAN class="DLSVAR">$42.10</SPAN></SPAN><SPAN> </SPAN>to your account &#x2026;<SPAN><SPAN class="DLSVAR">3344</SPAN></SPAN>.<SPAN></SPAN></SPAN></B></P>
+<DIV align="center"><TABLE class="normal" style="background:#e8e8e8;border-collapse:collapse"><TR><TD style="width:112pt;border:none" valign="top"><P class="normal"><B><SPAN style="color:#000000;font-family:'Arial'">From:</SPAN></B></P></TD><TD style="width:248pt;border:none" valign="top"><P class="normal"><SPAN style="font-family:'Arial'"><SPAN class="DLSVAR">USAA CREDIT</SPAN></SPAN></P></TD></TR><TR><TD style="width:112pt;border:none" valign="top"><P class="normal"><B><SPAN style="color:#000000;font-family:'Arial'">To:</SPAN></B></P></TD><TD style="width:248pt;border:none" valign="top"><P class="normal"><SPAN style="color:#000000;font-family:'Arial'">&#x2026;</SPAN><SPAN style="font-family:'Arial'"><SPAN class="DLSVAR">3344</SPAN></SPAN></P></TD></TR><TR><TD style="width:112pt;border:none" valign="top"><P class="normal"><B><SPAN style="color:#000000;font-family:'Arial'">Date:</SPAN></B></P></TD><TD style="width:248pt;border:none" valign="top"><P class="normal"><SPAN style="font-family:'Arial'"><SPAN class="DLSVAR">08/10/26</SPAN></SPAN></P></TD></TR><TR><TD style="width:112pt;border:none" valign="top"><P class="normal"><B><SPAN style="color:#000000;font-family:'Arial'">Amount:</SPAN></B></P></TD><TD style="width:248pt;border:none" valign="top"><P class="normal"><SPAN style="font-family:'Arial'"><SPAN class="DLSVAR">$42.10</SPAN></SPAN></P></TD></TR></TABLE></DIV>
+<P class="normal"><SPAN style="font-family:'Arial'">You asked us to let you know when a deposit goes into your account. You can update your <A href="https://www.example.invalid/alert-preferences">alert preferences</A> at any time.</SPAN></P>
+<P class="normal"><SPAN style="font-family:'Arial'">Thank you,</SPAN></P>
+<P class="normal"><SPAN style="font-family:'Arial'">USAA Federal Savings Bank</SPAN></P>
+</DIV></DIV></font></td></tr>
+</table></div></body></html>
