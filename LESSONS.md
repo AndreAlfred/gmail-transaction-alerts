@@ -104,6 +104,14 @@ Two things make this expensive to notice. An unlisted sender is not an error —
 
 `trustedSenders` maps address → institution and `enabledTrustedSenders_` keys on the address while gating on the institution, so listing several addresses for one institution does work correctly and they share that institution's Setup toggle. Retiring an address is still the right call once you have positive evidence it is dead — just carry the change through every reference.
 
+### A new branch in `parseUsaaPurchase_` is unreachable if `parseUsaa_` already claims the wording
+
+**What happened.** A PR titled "Add support for USAA debit card transaction alerts" added a handler for `came out of your account ending in` inside `parseUsaaPurchase_`. That wording is matched by `parseUsaa_` one level up, which routes it to `parseUsaaAccountDebit_` and returns — so the new branch could never execute. It merged with no tests, and nothing failed, because unreachable code does not fail. It also set `cardType: 'debit'`, which would have collided with the Chase debit-*card* convention had it ever run.
+
+**Why it matters.** Two contributors working the same alert family will not notice the collision from the diff alone: the added code reads correctly in isolation and the test suite stays green. The router is the only place the conflict is visible, and it is not in the diff.
+
+**How to apply.** `parseUsaa_` is a dispatch table written as `if` statements — **read it before adding a parser branch anywhere below it**, and add the new alert's wording as a router case rather than as a fallthrough inside an existing parser. A new alert type should come with a test that asserts its `eventType`, which is what would have caught this: the test would have gotten `account_debit` instead of the new value and failed immediately.
+
 ---
 
 ## Fixtures and privacy

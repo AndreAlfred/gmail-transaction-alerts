@@ -44,6 +44,21 @@ const DEBIT_PLAIN = fixture('usaa-account-debit-alert.txt');
 const DEBIT_HTML = fixture('usaa-account-debit-alert.html');
 const PURCHASE_PLAIN = fixture('usaa-purchase-alert.txt');
 
+const DEPOSIT_SUBJECT = 'Deposit to Your Bank Account';
+const DEPOSIT_PLAIN = fixture('usaa-deposit-alert.txt');
+const DEPOSIT_HTML = fixture('usaa-deposit-alert.html');
+
+const EXPECTED_DEPOSIT = {
+  transactionDate: '2026-08-10',
+  institution: 'USAA',
+  cardType: 'deposit',
+  last4: '3344',
+  cardholder: 'Casey Rivers',
+  merchant: 'USAA Deposit',
+  amount: 42.10,
+  eventType: 'deposit'
+};
+
 const EXPECTED_DEBIT = {
   transactionDate: '2026-08-04',
   institution: 'USAA',
@@ -67,6 +82,44 @@ test('account debit is extracted from HTML when the plain part is empty', () => 
   const result = parseAlert(BANK_SENDER, DEBIT_SUBJECT, DEBIT_HTML, '');
   assert.strictEqual(result.outcome, 'imported');
   assert.deepStrictEqual({ ...result.transaction }, EXPECTED_DEBIT);
+});
+
+test('deposit is extracted from the plain-text body', () => {
+  const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', DEPOSIT_PLAIN);
+  assert.strictEqual(result.outcome, 'imported');
+  assert.deepStrictEqual({ ...result.transaction }, EXPECTED_DEPOSIT);
+});
+
+test('deposit is extracted from HTML when the plain part is empty', () => {
+  // The HTML splits the holder's first and last name across <br />, same as
+  // the debit alert, and masks the account number with the &#x2026; entity
+  // rather than the literal "..." the debit alert body uses.
+  const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, DEPOSIT_HTML, '');
+  assert.strictEqual(result.outcome, 'imported');
+  assert.deepStrictEqual({ ...result.transaction }, EXPECTED_DEPOSIT);
+});
+
+test('a deposit missing its Date field goes to review', () => {
+  const withoutDate = DEPOSIT_PLAIN.replace(/Date:\n\t08\/10\/26\n/, '');
+  assert.ok(!/08\/10\/26/.test(withoutDate), 'fixture edit must remove the date');
+  const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', withoutDate);
+  assert.strictEqual(result.outcome, 'needs_review');
+});
+
+test('a deposit missing its amount goes to review', () => {
+  const withoutAmount = DEPOSIT_PLAIN.replace(
+    'You received a deposit of $42.10 to your account …3344.',
+    'You received a deposit to your account …3344.'
+  );
+  const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', withoutAmount);
+  assert.strictEqual(result.outcome, 'needs_review');
+});
+
+test('a deposit does not get misrouted to the account-debit parser', () => {
+  const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', DEPOSIT_PLAIN);
+  assert.strictEqual(result.outcome, 'imported');
+  assert.strictEqual(result.transaction.eventType, 'deposit');
+  assert.notStrictEqual(result.transaction.merchant, 'USAA Bank Debit');
 });
 
 test('mailcenter.usaa.com is a trusted USAA sender', () => {
