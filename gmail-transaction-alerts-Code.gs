@@ -36,7 +36,7 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.6.1',
+  parserVersion: '1.6.2',
   // USAA now sends from mailcenter; the older omem subdomain is retired and
   // was removed deliberately. Entries are matched as exact addresses -- adding
   // or correcting one is the supported fix for a rejected sender; loosening the
@@ -199,51 +199,15 @@ function parseUsaaPurchase_(text) {
   var charge = text.match(/Your\s+(.+?)\s+\.{3}\s*(\d{4})\s+was charged\s+(\$[\d,]+(?:\.\d{2})?)\s+at\s+(.+?)(?=\n\s*Date\s*:)/i);
   var date = text.match(/Date\s*:\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
   var holder = text.match(/Cardholder\s*name\s*:\s*([^\n]+)/i);
-
-  if (charge && date && holder) {
-    var parsedDate = parseUsDate_(date[1]);
-    var amount = parseAmount_(charge[3]);
-
-    if (!parsedDate || !Number.isFinite(amount)) {
-      return { outcome: 'needs_review', reason: 'Invalid USAA date or amount' };
-    }
-
-    return { outcome: 'imported', transaction: {
-      transactionDate: parsedDate,
-      institution: 'USAA',
-      cardType: charge[1].trim().toLowerCase(),
-      last4: charge[2],
-      cardholder: holder[1].trim(),
-      merchant: charge[4].trim(),
-      amount: amount,
-      eventType: 'purchase_authorization'
-    }};
-  }
-
-  var debit = text.match(/(\$[\d,]+(?:\.\d{2})?)\s+came out of your account ending in\s+(\d{4})\s*\./i);
-  var merchant = text.match(/To\s*:\s*([^\n]+)/i);
-
-  if (debit && date && merchant) {
-    var debitDate = parseUsDate_(date[1]);
-    var debitAmount = parseAmount_(debit[1]);
-
-    if (!debitDate || !Number.isFinite(debitAmount)) {
-      return { outcome: 'needs_review', reason: 'Invalid USAA date or amount' };
-    }
-
-    return { outcome: 'imported', transaction: {
-      transactionDate: debitDate,
-      institution: 'USAA',
-      cardType: 'debit',
-      last4: debit[2],
-      cardholder: '',
-      merchant: merchant[1].trim(),
-      amount: debitAmount,
-      eventType: 'account_debit_alert'
-    }};
-  }
-
-  return { outcome: 'needs_review', reason: 'Unsupported or incomplete USAA alert' };
+  if (!charge || !date || !holder) return { outcome: 'needs_review', reason: 'Unsupported or incomplete USAA alert' };
+  var parsedDate = parseUsDate_(date[1]);
+  var amount = parseAmount_(charge[3]);
+  if (!parsedDate || !Number.isFinite(amount)) return { outcome: 'needs_review', reason: 'Invalid USAA date or amount' };
+  return { outcome: 'imported', transaction: {
+    transactionDate: parsedDate, institution: 'USAA', cardType: charge[1].trim().toLowerCase(),
+    last4: charge[2], cardholder: holder[1].trim(), merchant: charge[4].trim(), amount: amount,
+    eventType: 'purchase_authorization'
+  }};
 }
 
 function parseChase_(subject, text) {

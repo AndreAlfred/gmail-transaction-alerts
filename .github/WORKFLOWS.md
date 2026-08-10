@@ -8,7 +8,7 @@ Workflows for this repository live under [`workflows/`](workflows/).
 | Workflow | Job name | Required on `main`? | Purpose |
 |---|---|---|---|
 | [`ci.yml`](workflows/ci.yml) | `tests` | **Yes** | `node --test tests/*.test.js` |
-| [`version-check.yml`](workflows/version-check.yml) | `version-check` | **Yes** | Require `.gs` and `.txt` **byte-identical**; require `parserVersion` bump when those files change |
+| [`version-check.yml`](workflows/version-check.yml) | `version-check` | **Yes** | Require `parserVersion` bump when `gmail-transaction-alerts-Code.gs` changes |
 | [`release.yml`](workflows/release.yml) | `release` | No | Tag `{parserVersion}` (no `v` prefix) and create a GitHub Release on **merged PR to `main`**, or manual `workflow_dispatch` |
 
 Helper script: [`scripts/extract-parser-version.js`](scripts/extract-parser-version.js).
