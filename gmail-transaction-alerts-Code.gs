@@ -27,8 +27,10 @@
  *   "USAA Deposit"; Card Type is "deposit" and Event Type is deposit.
  *   Chase and Venmo alerts do not include a cardholder name, so that cell is
  *   blank on those rows. Chase outbound transfers use Card Type "transfer"
- *   and Event Type transfer_out; Merchant is the recipient. Venmo amounts are
- *   always positive; Event Type is venmo_payment (you paid) or
+ *   and Event Type transfer_out; Merchant is the recipient. Chase Zelle
+ *   receipts use Card Type "zelle" and Event Type zelle_received; Merchant is
+ *   the sender, and Last 4 is blank because the alert has no account number.
+ *   Venmo amounts are always positive; Event Type is venmo_payment (you paid) or
  *   venmo_payment_received (someone paid you). This is an authorization-alert
  *   log, not a posted bank ledger: tips, refunds, and final posted amounts
  *   can differ.
@@ -36,7 +38,7 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.7.0',
+  parserVersion: '1.8.0',
   // USAA now sends from mailcenter; the older omem subdomain is retired and
   // was removed deliberately. Entries are matched as exact addresses -- adding
   // or correcting one is the supported fix for a rejected sender; loosening the
@@ -243,12 +245,64 @@ function parseChase_(subject, text) {
   if (/Payment scheduled/i.test(combined) && /credit card payment/i.test(combined)) {
     return { outcome: 'ignored', institution: 'Chase', eventType: 'card_payment_scheduled', reason: 'Scheduled card payment is not a merchant purchase' };
   }
+  // Zelle money received. Must be tested BEFORE the transfer branch: this
+  // alert uses "Sent on" as its date label, the same label outbound transfers
+  // use, so a receipt would otherwise be recorded as money leaving the
+  // account. Keyed on the "NAME sent you money" headline rather than the
+  // subject, which carries a registered-trademark character.
+  if (/\bsent you money\b/i.test(combined)) {
+    return parseChaseZelleReceived_(text);
+  }
   // Outbound transfers: "You sent $X to RECIPIENT" / Transfer alert badge.
   // Distinct from purchases (Merchant|Description) and card payments.
   if (/You sent\s+\$[\d,]+(?:\.\d{2})?/i.test(combined) || /(?:^|\n)\s*Transfer alert\b/i.test(combined)) {
     return parseChaseTransferOut_(subject, text);
   }
   return parseChasePurchase_(subject, text);
+}
+
+// Chase Zelle receipt, subject "You received money with Zelle(R)". Fields are
+// the same nested two-cell rows as the other Chase alerts, so label and value
+// land on consecutive lines after htmlToText_ and the regexes bridge with \s*.
+// Labels here are Amount / Sent on / Transaction number / Memo.
+//
+// The counterparty appears only in the "NAME sent you money" headline -- there
+// is no Sender or From row -- so that headline is the sole source for Merchant.
+// The name also occurs in a "NAME is registered with a Zelle member bank"
+// sentence further down, which is prose and not a reliable field.
+//
+// This alert carries no account number anywhere, so Last 4 is blank rather
+// than invented, as is Cardholder (no Chase alert carries one). Memo is
+// deliberately not read: it is free text a sender controls, and the sheet is
+// not a place to land it. Amount stays positive with direction in Event Type,
+// matching Chase transfers, USAA deposits, and Venmo receipts.
+function parseChaseZelleReceived_(text) {
+  var body = normalizeText_(text);
+
+  var sender = body.match(/(?:^|\n)\s*(.+?)\s+sent you money\s*(?:\n|$)/i);
+  var date = body.match(/(?:^|\n)\s*Sent on\b\s*:?\s*([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})/i);
+  var amount = body.match(/(?:^|\n)\s*Amount\b\s*:?\s*(\$[\d,]+\.\d{2})/i);
+
+  if (!sender || !date || !amount) {
+    return { outcome: 'needs_review', institution: 'Chase', reason: 'Unsupported Chase alert format' };
+  }
+
+  var parsedDate = parseMonthNameDate_(date[1]);
+  var parsedAmount = parseAmount_(amount[1]);
+  if (!parsedDate || !Number.isFinite(parsedAmount)) {
+    return { outcome: 'needs_review', institution: 'Chase', reason: 'Invalid Chase date or amount' };
+  }
+
+  return { outcome: 'imported', transaction: {
+    transactionDate: parsedDate,
+    institution: 'Chase',
+    cardType: 'zelle',
+    last4: '',
+    cardholder: '',
+    merchant: String(sender[1]).trim(),
+    amount: parsedAmount,
+    eventType: 'zelle_received'
+  }};
 }
 
 // Chase outbound transfer to another bank/account. Field labels differ from

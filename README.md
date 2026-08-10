@@ -9,7 +9,7 @@ It deliberately does one thing: **detect a supported transaction-alert email, ex
 | Institution | Sender | Handling |
 |---|---|---|
 | USAA | `USAA.Customer.Service@mailcenter.usaa.com` | Card purchase authorizations, bank-account debit alerts, and bank-account deposit alerts imported |
-| Chase | `no.reply.alerts@chase.com` | Credit and debit merchant purchases and outbound transfers imported; scheduled card payments ignored |
+| Chase | `no.reply.alerts@chase.com` | Credit and debit merchant purchases, outbound transfers, and Zelle money received imported; scheduled card payments ignored |
 | Venmo | `venmo@venmo.com` | P2P payments you sent and payments you received imported; other Venmo mail goes to Needs Review |
 
 Anything else from a trusted sender is routed to an **Import Issues** sheet and labeled **Needs Review** rather than silently dropped. Mail from any other sender is rejected outright.
@@ -94,6 +94,7 @@ Exact check names must match the workflow job `name:` fields above. If a check i
 - USAA **bank-account debit** alerts have no merchant, so **Merchant** is the fixed label `USAA Bank Debit`. **Card Type** is `bank debit` — distinct from Chase's `debit`, which means a debit *card* purchase — and **Event Type** is `account_debit`. Amount is positive, and **Last 4** is the bank account rather than a card.
 - USAA **bank-account deposit** alerts likewise have no merchant, so **Merchant** is the fixed label `USAA Deposit`. **Card Type** and **Event Type** are both `deposit`. Amount is positive — direction is carried by Event Type, not by sign — and **Last 4** is the bank account.
 - Chase outbound transfers use **Card Type** `transfer` and **Event Type** `transfer_out`; **Merchant** is the recipient. Amount is positive.
+- Chase **Zelle money received** uses **Card Type** `zelle` and **Event Type** `zelle_received`; **Merchant** is the sender's name. Amount is positive. These alerts carry no account number, so **Last 4** is blank, and the Memo field is not imported.
 - Venmo amounts are always positive. **Event Type** is `venmo_payment` (you paid) or `venmo_payment_received` (someone paid you); **Card Type** is `payment` or `received`. **Merchant** is the counterparty name.
 - Only alerts that arrive as email are captured. If an alert doesn't fire, there's no row.
 

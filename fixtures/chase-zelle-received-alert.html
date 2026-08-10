@@ -1,0 +1,62 @@
+<!--
+  Synthetic Chase "You received money with Zelle" alert (the text/html MIME
+  part). Structure, tag nesting, and field labels mirror a real alert from
+  no.reply.alerts@chase.com. All values are fictitious.
+
+  Subject: You received money with Zelle®
+
+  Structural quirks preserved on purpose:
+    - the sender's name appears only in the headline ("NAME sent you money")
+      and in the body copy; there is no Sender/From field row
+    - the date label is "Sent on", the same label Chase outbound transfers
+      use, even though this alert is money RECEIVED
+    - there is no account row and no last 4 anywhere in the message
+    - the Memo row is present but empty, which is the common case
+    - "Zelle" is followed by a <span>&reg;</span>, so htmlToText_ leaves
+      "Zelle &reg;" with a space before the entity text
+    - Amount / Sent on / Transaction number / Memo are two-cell table rows,
+      so label and value land on consecutive lines after htmlToText_
+-->
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title></title></head>
+<body style="padding: 0px;margin: 0px; background-color:#d7dbe0;">
+<table role="presentation" align="center" width="100%" border="0" cellspacing="0" cellpadding="0"><tr><td align="center"><table role="presentation" align="center" width="800" cellpadding="0" cellspacing="0" border="0"><tr><td align="left"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+<tr><td align="left" style="vertical-align:top; padding: 20px 28px 0px;"><table role="presentation" align="left" cellpadding="0" cellspacing="0" border="0"><tr><td align="left"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="left" style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:bold; color:#000000; background-color:#D7DBE0; border-radius:20px;">Zelle<span style="font-size:70%; line-height:0; vertical-align:3px;">&reg;</span> payment</td></tr></table></td></tr></table></td></tr>
+<tr><td align="left" style="vertical-align:top; background-color: #ffffff; padding:20px 30px 28px; font-family:Arial, Helvetica, sans-serif; font-size:30px; font-weight: bold; color:#414042;">SAMPLE SENDER sent you money</td></tr>
+<tr><td align="left" style="vertical-align:top; padding:0px 30px 30px 30px; font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#414042;">Here are the details:</td></tr>
+<tr><td align="left" style="vertical-align:top; padding: 0px 150px 0px 30px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+<tr><td align="left" style="vertical-align:top; padding: 10px 0px 5px;border-bottom: solid 1px #414042;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+<td align="left" style="vertical-align:top; font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#414042;">Amount</td>
+<td align="right" style="vertical-align:top; font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:bold; color:#414042;">$20.00</td>
+</tr></table></td></tr>
+<tr><td align="left" style="vertical-align:top; padding: 20px 0px 5px;border-bottom: solid 1px #414042;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+<td align="left" style="vertical-align:top; font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#414042;">Sent on</td>
+<td align="right" style="vertical-align:top; font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:bold; color:#414042;"><span class="applelinksgray2"><a style="color:#414042;text-decoration: none;">Aug 06, 2026</a></span></td>
+</tr></table></td></tr>
+<tr><td align="left" style="vertical-align:top; padding: 20px 0px 5px;border-bottom: solid 1px #414042;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+<td align="left" style="vertical-align:top; font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#414042;">Transaction number</td>
+<td align="right" style="vertical-align:top; font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:bold; color:#414042;">00000000000</td>
+</tr></table></td></tr>
+<tr><td align="left" style="vertical-align:top; padding: 20px 0px 5px; border-bottom: solid 1px #414042;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+<td align="left" style="vertical-align:top; font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#414042;">Memo</td>
+<td align="right" style="vertical-align:top; font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:bold; color:#414042;"></td>
+</tr></table></td></tr>
+</table>
+</td></tr>
+<tr><td align="left" style="vertical-align:top; padding:40px 30px 40px; font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#414042;">SAMPLE SENDER is registered with a Zelle<span style="font-size:70%; line-height:0; vertical-align:3px;">&reg;</span> member bank that supports payments in real time, so your money will usually be available in a few moments.</td></tr>
+<tr><td align="left" style="vertical-align:top; padding:0px 30px 40px; font-family:Arial, Helvetica, sans-serif; font-size:16px; color:#414042;">Questions? Visit <a href="https://www.example.invalid/zelle">chase.com/Zelle</a> or contact us <span class="applelinksgray2"><a style="color:#414042;text-decoration: none;">at 0-000-000-0000</a></span>.</td></tr>
+<tr><td align="left" style="vertical-align:top; padding: 0px 0px; background-color: #F6F6F6;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="left" style="vertical-align:top; padding:20px 30px 60px; font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#717171;">
+<span role="heading" style="text-transform: uppercase; font-weight: bold;">About this message</span><br />
+<br />
+This service email gives you updates and information about your Chase relationship.<br />
+<br />
+Chase cannot guarantee the delivery of alerts and notifications. You can always check chase.com or the Chase Mobile app for the status of your accounts including your latest account balances and transaction details.<br />
+<br />
+To protect your personal information, please don't reply to this message. Chase won't ask for confidential information in an email.<br />
+<br />
+&copy; 2026 JPMorgan Chase &amp; Co. </td></tr></table></td></tr>
+</table></td></tr></table></td></tr></table>
+</body>
+</html>
