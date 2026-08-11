@@ -1,0 +1,99 @@
+<!--
+  Synthetic Chase checking-account daily summary alert.
+  Structure, tag nesting, and field labels mirror a real alert from
+  no.reply.alerts@chase.com. All values are fictitious.
+
+  Subject: Your daily summary for account ending in (...4321)
+  This alert is balance/activity totals only — not a merchant purchase —
+  so the parser recognizes it and ignores it (same disposition as scheduled
+  card payments). Key markers: Daily summary badge, Account summary for
+  <weekday, Mon D, YYYY>, End of Day Balance / Total Withdrawals / Total Deposits.
+-->
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<title></title>
+<style type="text/css">
+body { background-color: #d7dbe0 !important; }
+td { -webkit-text-size-adjust: none; }
+</style>
+</head>
+<body style="padding: 0px;margin: 0px; background-color:#d7dbe0;">
+<table role="presentation" align="center" width="100%" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td align="left"><img src="https://www.chase.com/content/dam/email/images/chase-logo-h-rgb.png" width="104" height="20" border="0" alt="Chase Logo"/></td>
+        </tr>
+        <tr>
+          <td align="left" style="background-color:#D7DBE0;">Daily summary</td>
+        </tr>
+        <tr>
+          <td align="left" style="font-size:30px; font-weight: bold; color:#414042;">Account summary for <span class="applelinksgray41"><a style="color:#414042;text-decoration: none;">Monday, Aug 10, 2026</a></span></td>
+        </tr>
+      </table>
+      <!-- Start field table: nested two-cell rows mirror live daily summaries -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td align="left" style="padding: 10px 0px;border-bottom: solid 1px #414042;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td align="left" style="font-size:16px; color:#414042;" class="font14">Account ending in</td>
+                <td align="right" style="font-size:16px; color:#414042;" class="font14">(...4321)</td>
+              </tr>
+            </table></td>
+        </tr>
+        <tr>
+          <td align="left" style="padding: 10px 0px;border-bottom: solid 2px #414042;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td align="left" style="font-size:16px; color:#414042; font-weight: bold" class="font14">End of Day Balance</td>
+                <td align="right" style="font-size:16px; font-weight:bold; color:#414042;" class="font14">$1,234.56</td>
+              </tr>
+            </table></td>
+        </tr>
+        <tr>
+          <td align="left" style="padding: 10px 0px;border-bottom: solid 2px #414042;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td align="left" style="font-size:16px; color:#414042; font-weight: bold" class="font14">Total Withdrawals</td>
+                <td align="right" style="font-size:16px; font-weight:bold; color:#414042;" class="font14">$12.34</td>
+              </tr>
+            </table></td>
+        </tr>
+        <tr>
+          <td align="left" style="padding: 10px 0px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td align="left" style="font-size:16px; color:#414042;" class="font14">&bull;</td>
+                <td align="left" style="font-size:16px; color:#414042;" class="font14">Debit Card</td>
+                <td align="right" style="font-size:16px; color:#414042;" class="font14">$12.34</td>
+              </tr>
+            </table></td>
+        </tr>
+        <tr>
+          <td align="left" style="padding: 10px 0px;border-bottom: solid 2px #414042;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td align="left" style="font-size:16px; color:#414042; font-weight: bold" class="font14">Total Deposits</td>
+                <td align="right" style="font-size:16px; font-weight: bold; color:#414042;" class="font14">$0.00</td>
+              </tr>
+            </table></td>
+        </tr>
+      </table>
+      <!-- End field table -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td align="left" style="font-size:16px; color:#414042;">This may not be a complete list of your transactions. To see more details, please review your account.</td>
+        </tr>
+        <tr>
+          <td align="left" style="font-size:12px; color:#717171;"><span role="heading" style="text-transform: uppercase; font-weight: bold;">About this message</span><br />
+            <br />
+            This service email was sent based on your alert settings. Use the Chase&nbsp;Mobile app or visit <a href="https://www.chase.com/personal/mobile-online-banking/login-alerts">chase.com/alerts</a> to view or manage your settings.<br />
+            <br />
+            You can always check chase.com or the Chase&nbsp;Mobile app for the status of your account.<br />
+            <br />
+            &copy; 2026 JPMorgan Chase &amp; Co. </td>
+        </tr>
+      </table></td>
+  </tr>
+</table>
+</body>
+</html>

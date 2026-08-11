@@ -38,7 +38,7 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.9.0',
+  parserVersion: '1.10.0',
   // USAA now sends from mailcenter; the older omem subdomain is retired and
   // was removed deliberately. Entries are matched as exact addresses -- adding
   // or correcting one is the supported fix for a rejected sender; loosening the
@@ -266,6 +266,14 @@ function parseChase_(subject, text) {
   var combined = normalizeText_((subject || '') + '\n' + text);
   if (/Payment scheduled/i.test(combined) && /credit card payment/i.test(combined)) {
     return { outcome: 'ignored', institution: 'Chase', eventType: 'card_payment_scheduled', reason: 'Scheduled card payment is not a merchant purchase' };
+  }
+  // Checking-account daily summary: End of Day Balance / Total Withdrawals /
+  // Total Deposits. Not a merchant purchase — ignore rather than Needs Review.
+  // Subject "Your daily summary for account ending in (...NNNN)" is enough on
+  // its own; body badge + End of Day Balance covers a subject wording change.
+  if (/Your daily summary for account ending in/i.test(combined) ||
+      (/\bDaily summary\b/i.test(combined) && /End of Day Balance/i.test(combined))) {
+    return { outcome: 'ignored', institution: 'Chase', eventType: 'account_daily_summary', reason: 'Daily account summary is not a merchant purchase' };
   }
   // Zelle money received. Must be tested BEFORE the transfer branch: this
   // alert uses "Sent on" as its date label, the same label outbound transfers
