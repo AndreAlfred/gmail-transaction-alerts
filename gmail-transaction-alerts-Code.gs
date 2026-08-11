@@ -21,10 +21,10 @@
  *   import stops with an error naming it instead of writing to the wrong place.)
  *
  * NOTES
- *   USAA bank-account debit alerts have no merchant, so Merchant is the fixed
- *   label "USAA Bank Debit"; Card Type is "bank debit" and Event Type is
- *   account_debit. Deposit alerts likewise have no merchant, so Merchant is
- *   "USAA Deposit"; Card Type is "deposit" and Event Type is deposit.
+ *   For USAA bank-account debit alerts, Merchant is taken from the value after
+ *   To:; Card Type is "bank debit" and Event Type is account_debit. For deposit
+ *   alerts, Merchant is taken from the value after From:; Card Type is "deposit"
+ *   and Event Type is deposit.
  *   Chase and Venmo alerts do not include a cardholder name, so that cell is
  *   blank on those rows. Chase outbound transfers use Card Type "transfer"
  *   and Event Type transfer_out; Merchant is the recipient. Chase Zelle
@@ -38,7 +38,7 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.8.1',
+  parserVersion: '1.9.0',
   // USAA now sends from mailcenter; the older omem subdomain is retired and
   // was removed deliberately. Entries are matched as exact addresses -- adding
   // or correcting one is the supported fix for a rejected sender; loosening the
@@ -151,10 +151,11 @@ function parseAlert(sender, subject, htmlBody, plainBody) {
   return { outcome: 'needs_review', institution: institution, reason: 'Unsupported institution' };
 }
 
-// USAA sends three alert shapes. Card purchases name a merchant; bank-account
-// debits and deposits do not. Routing is on wording rather than the subject
-// because only the body is available here, and anything unrecognized still
-// falls through to the purchase parser and on to review.
+// USAA sends three alert shapes. Card purchases name a merchant. Bank-account
+// debits identify the destination after To:, while deposits identify the source
+// after From:. Routing is on wording rather than the subject because only the
+// body is available here, and anything unrecognized still falls through to the
+// purchase parser and on to review.
 function parseUsaa_(text) {
   if (/came out of your account ending in/i.test(text)) return parseUsaaAccountDebit_(text);
   if (/received a deposit of/i.test(text)) return parseUsaaAccountDeposit_(text);
@@ -192,23 +193,25 @@ function parseUsaaAccountActivity_(text, activityPattern, details) {
 
 // Bank-account debit alert, subject "Debit Alert for Your USAA Bank Account".
 // Body reads "$88.45 came out of your account ending in 7788." with To: and
-// Date: as two-cell table rows, so label and value land on consecutive lines
-// after htmlToText_ -- the Date regex bridges that with \s*.
+// Date: as two-cell table rows. After htmlToText_, a field's label and value
+// may be on the same line or consecutive lines.
 //
-// There is no merchant on this alert type. The only descriptive field is the
-// To: destination, which is the constant "USAA DEBIT", so Merchant is a fixed
-// label rather than a parsed value. The To: row is deliberately not required:
-// its value is unused, so requiring it would add a failure mode without adding
-// data. Amount stays positive and direction lives in Event Type, matching
-// Chase transfers and Venmo receipts. Card Type is "bank debit", not "debit",
-// because Chase debit-card purchases already use "debit".
+// Merchant is taken from the value following To:. The field is required because
+// it supplies the descriptive destination for the transaction. Amount stays
+// positive and direction lives in Event Type, matching Chase transfers and
+// Venmo receipts. Card Type is "bank debit", not "debit", because Chase
+// debit-card purchases already use "debit".
 function parseUsaaAccountDebit_(text) {
+  var merchant = String(text).match(/(?:^|\n)\s*To\s*:[ \t]*(?:\n[ \t]*)?([^\n]+)/i);
+  if (!merchant) {
+    return { outcome: 'needs_review', institution: 'USAA', reason: 'Unsupported or incomplete USAA account alert' };
+  }
   return parseUsaaAccountActivity_(
     text,
     /(\$[\d,]+(?:\.\d{2})?)\s+came out of your account ending in\s+(\d{4})/i,
     {
       cardType: 'bank debit',
-      merchant: 'USAA Bank Debit',
+      merchant: merchant[1].trim(),
       eventType: 'account_debit',
       incompleteReason: 'Unsupported or incomplete USAA account alert'
     }
@@ -217,24 +220,27 @@ function parseUsaaAccountDebit_(text) {
 
 // Bank-account deposit alert, subject "Deposit to Your Bank Account". Body
 // reads "You received a deposit of $42.10 to your account …3344." with
-// From:/To:/Date:/Amount: as two-cell table rows, so the Date regex bridges
-// consecutive lines the same way the debit alert's does. The account number
-// is masked with an ellipsis -- a literal "..." in the plain-text part, the
-// HTML entity &#x2026; (which htmlToText_ decodes to the same "…" character)
-// in the HTML part -- so the last4 regex accepts either.
+// From:/To:/Date:/Amount: as two-cell table rows. After htmlToText_, a field's
+// label and value may be on the same line or consecutive lines. The account
+// number is masked with an ellipsis -- a literal "..." in the plain-text part,
+// or the Unicode "…" character in the HTML-derived text -- so the last4 regex
+// accepts either.
 //
-// There is no merchant on this alert type either. The From: field is the
-// constant "USAA CREDIT" and, like the debit alert's To: field, is unused
-// and not required. Card Type is "deposit", distinct from the debit alert's
-// "bank debit", because the two are opposite directions on the same account
-// and should read that way in the sheet.
+// Merchant is taken from the value following From:. The field is required
+// because it supplies the descriptive source of the deposit. Card Type is
+// "deposit", distinct from the debit alert's "bank debit", because the two are
+// opposite directions on the same account.
 function parseUsaaAccountDeposit_(text) {
+  var merchant = String(text).match(/(?:^|\n)\s*From\s*:[ \t]*(?:\n[ \t]*)?([^\n]+)/i);
+  if (!merchant) {
+    return { outcome: 'needs_review', institution: 'USAA', reason: 'Unsupported or incomplete USAA deposit alert' };
+  }
   return parseUsaaAccountActivity_(
     text,
     /received a deposit of\s+(\$[\d,]+(?:\.\d{2})?)\s+to your account\s+(?:…|\.{3})\s*(\d{4})/i,
     {
       cardType: 'deposit',
-      merchant: 'USAA Deposit',
+      merchant: merchant[1].trim(),
       eventType: 'deposit',
       incompleteReason: 'Unsupported or incomplete USAA deposit alert'
     }

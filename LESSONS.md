@@ -14,7 +14,7 @@ This is a living file. Add to it when a bug or review turns up something that wa
 
 **Why it matters.** The failure is invisible. Nothing throws, the status line updates, dedup still works — the data is simply somewhere the user never looks. It is easy to misdiagnose as a parser failure and go rewrite a regex that was never broken.
 
-**How to apply.** Anchor appends to a column that *only the script writes* — here, `Gmail Message ID` — and scan it bottom-up (`lastScriptRow_`). Never use `getLastRow()` as an append anchor on a sheet a user can edit. The same caution applies to `getDataRange()` and `appendRow()`, which have the same whole-sheet notion of "last".
+**How to apply.** Use `lastUsedScriptRow_` to scan every script-owned column for the last occupied row. This ignores user formulas in non-script columns while still recognizing manually entered rows that contain Transaction Date, Merchant, or Amount but no Gmail Message ID. Never use `getLastRow()` as an append anchor on a sheet a user can edit. The same caution applies to `getDataRange()` and `appendRow()`, which have the same whole-sheet notion of "last".
 
 ### An append anchor must recognize rows the *user* wrote, not just rows the script wrote
 
@@ -61,6 +61,14 @@ The Setup tab said the transaction imported; the Transactions tab didn't show it
 Chase renders each field as a nested two-cell table row (`<td>Merchant</td><td>SAMPLE*COFFEE SHOP</td>`). `htmlToText_` turns every `</tr>` into a newline and remaining tags into spaces, but **source newlines between the two `<td>`s survive**, so live alerts often normalize to consecutive lines (`Merchant` then `SAMPLE*COFFEE SHOP`) rather than a single `Label Value` line. Field regexes must allow `\s*` between label and value. Anchoring to line boundaries (`(?:^|\n)\s*Merchant\b`) is then both simple and robust.
 
 The alternative — regexing across the raw blob — would match the wrong things. This email body contains `manage your account` and `status of your accounts` in the footer, and a `$0.01` threshold amount *after* the real amount. Line anchoring plus first-match wins avoids all of it.
+
+### USAA account activity uses different counterparty labels by direction
+
+**What happened.** USAA bank-account debit and deposit alerts were originally imported with fixed Merchant labels while their `To:` and `From:` values were discarded. That hid the descriptive value carried by the email. When Merchant became dynamic, existing tests still expected the fixed labels and explicitly asserted that the now-required rows could be missing.
+
+**Why it matters.** The two alert types use opposite labels for the value that belongs in Merchant: a debit uses the destination after `To:`, while a deposit uses the origin after `From:`. It is easy to swap them, continue discarding them, or allow an incomplete alert to import with an invented fallback.
+
+**How to apply.** For USAA account debits, take Merchant from the required `To:` row. For USAA deposits, take Merchant from the required `From:` row. Accept the label and value on the same line or consecutive normalized lines. If the applicable row is missing, send the alert to Needs Review. Tests must cover plain text, HTML, a changed synthetic Merchant value proving the field is dynamic, and removal of the required row.
 
 ### Chase debit alerts reuse the layout but not the vocabulary
 
