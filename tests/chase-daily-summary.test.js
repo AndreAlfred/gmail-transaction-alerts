@@ -2,9 +2,8 @@
  * Chase daily account-summary parser tests.
  *
  * These alerts carry End of Day Balance / Total Withdrawals / Total Deposits
- * rather than a merchant purchase, so they are recognized and ignored — the
- * same disposition as scheduled card payments — instead of landing in Needs
- * Review.
+ * rather than a merchant purchase. The parser returns account_balance so the
+ * intake path can upsert the Accounts sheet — never Transactions.
  *
  * Run:  node --test tests/chase-daily-summary.test.js
  */
@@ -38,31 +37,38 @@ const FIXTURE_HTML = fs.readFileSync(
 );
 const FIXTURE_SUBJECT = 'Your daily summary for account ending in (...4321)';
 
-test('Chase daily account summary is ignored, not imported or reviewed', () => {
+test('Chase daily account summary yields account_balance for Accounts upsert', () => {
   const result = parseAlert(CHASE_SENDER, FIXTURE_SUBJECT, FIXTURE_HTML, '');
-  assert.strictEqual(result.outcome, 'ignored');
-  assert.strictEqual(result.institution, 'Chase');
-  assert.strictEqual(result.eventType, 'account_daily_summary');
-  assert.ok(/daily|summary/i.test(result.reason));
+  assert.strictEqual(result.outcome, 'account_balance');
+  assert.deepStrictEqual({ ...result.account }, {
+    institution: 'Chase',
+    last4: '4321',
+    balance: 1234.56,
+    balanceAsOf: '2026-08-10',
+    eventType: 'account_daily_summary'
+  });
 });
 
-test('Chase daily summary is recognized from subject alone', () => {
-  // Body layout may change; the subject wording is stable enough to ignore.
+test('Chase daily summary with subject only (no body fields) goes to review', () => {
   const result = parseAlert(CHASE_SENDER, FIXTURE_SUBJECT, '<html><body></body></html>', '');
-  assert.strictEqual(result.outcome, 'ignored');
-  assert.strictEqual(result.eventType, 'account_daily_summary');
+  assert.strictEqual(result.outcome, 'needs_review');
+  assert.strictEqual(result.institution, 'Chase');
+  assert.match(result.reason, /incomplete/i);
 });
 
-test('Chase daily summary body markers ignore without the subject wording', () => {
-  // Badge + End of Day Balance is distinctive even if the subject changes.
-  const result = parseAlert(
-    CHASE_SENDER,
-    'Account alert',
-    FIXTURE_HTML,
-    ''
-  );
-  assert.strictEqual(result.outcome, 'ignored');
-  assert.strictEqual(result.eventType, 'account_daily_summary');
+test('Chase daily summary body markers parse without the subject wording', () => {
+  const result = parseAlert(CHASE_SENDER, 'Account alert', FIXTURE_HTML, '');
+  assert.strictEqual(result.outcome, 'account_balance');
+  assert.strictEqual(result.account.last4, '4321');
+  assert.strictEqual(result.account.balance, 1234.56);
+  assert.strictEqual(result.account.balanceAsOf, '2026-08-10');
+});
+
+test('Chase daily summary missing End of Day Balance goes to review', () => {
+  const withoutBalance = FIXTURE_HTML.replace(/End of Day Balance[\s\S]*?\$1,234\.56/, 'Total Withdrawals');
+  const result = parseAlert(CHASE_SENDER, FIXTURE_SUBJECT, withoutBalance, '');
+  assert.strictEqual(result.outcome, 'needs_review');
+  assert.match(result.reason, /incomplete/i);
 });
 
 test('a daily-summary-shaped alert from an untrusted sender is rejected', () => {
@@ -71,8 +77,8 @@ test('a daily-summary-shaped alert from an untrusted sender is rejected', () => 
   assert.strictEqual(result.reason, 'Untrusted sender');
 });
 
-// Regression: the ignore branch sits ahead of purchase/transfer parsing and
-// must not swallow real transaction alerts that merely mention "summary".
+// Regression: the daily-summary branch sits ahead of purchase/transfer parsing
+// and must not swallow real transaction alerts that merely mention "summary".
 test('Chase purchases still parse with daily-summary support present', () => {
   const purchaseHtml = fs.readFileSync(
     path.resolve(__dirname, '..', 'fixtures', 'chase-purchase-alert.html'),

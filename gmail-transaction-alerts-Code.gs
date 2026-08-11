@@ -30,15 +30,16 @@
  *   and Event Type transfer_out; Merchant is the recipient. Chase Zelle
  *   receipts use Card Type "zelle" and Event Type zelle_received; Merchant is
  *   the sender, and Last 4 is blank because the alert has no account number.
- *   Venmo amounts are always positive; Event Type is venmo_payment (you paid) or
- *   venmo_payment_received (someone paid you). This is an authorization-alert
- *   log, not a posted bank ledger: tips, refunds, and final posted amounts
- *   can differ.
+ *   Chase daily account summaries update the Accounts sheet (Balance / As Of)
+ *   and never write a Transactions row. Venmo amounts are always positive;
+ *   Event Type is venmo_payment (you paid) or venmo_payment_received (someone
+ *   paid you). This is an authorization-alert log, not a posted bank ledger:
+ *   tips, refunds, and final posted amounts can differ.
  */
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.10.0',
+  parserVersion: '1.11.0',
   // USAA now sends from mailcenter; the older omem subdomain is retired and
   // was removed deliberately. Entries are matched as exact addresses -- adding
   // or correcting one is the supported fix for a rejected sender; loosening the
@@ -267,13 +268,12 @@ function parseChase_(subject, text) {
   if (/Payment scheduled/i.test(combined) && /credit card payment/i.test(combined)) {
     return { outcome: 'ignored', institution: 'Chase', eventType: 'card_payment_scheduled', reason: 'Scheduled card payment is not a merchant purchase' };
   }
-  // Checking-account daily summary: End of Day Balance / Total Withdrawals /
-  // Total Deposits. Not a merchant purchase — ignore rather than Needs Review.
-  // Subject "Your daily summary for account ending in (...NNNN)" is enough on
-  // its own; body badge + End of Day Balance covers a subject wording change.
+  // Checking-account daily summary: End of Day Balance + as-of date. Upserts
+  // the Accounts sheet; never a Transactions row. Detect before purchase/
+  // transfer so balance fields are not mistaken for a merchant alert.
   if (/Your daily summary for account ending in/i.test(combined) ||
       (/\bDaily summary\b/i.test(combined) && /End of Day Balance/i.test(combined))) {
-    return { outcome: 'ignored', institution: 'Chase', eventType: 'account_daily_summary', reason: 'Daily account summary is not a merchant purchase' };
+    return parseChaseDailySummary_(subject, text);
   }
   // Zelle money received. Must be tested BEFORE the transfer branch: this
   // alert uses "Sent on" as its date label, the same label outbound transfers
@@ -289,6 +289,42 @@ function parseChase_(subject, text) {
     return parseChaseTransferOut_(subject, text);
   }
   return parseChasePurchase_(subject, text);
+}
+
+// Chase checking-account daily summary. Subject
+// "Your daily summary for account ending in (...NNNN)"; body carries
+// Account ending in / End of Day Balance / Account summary for <date>.
+// Outcome is account_balance for the Accounts sheet upsert — not a
+// Transactions import. Last 4, balance, and as-of date are all required.
+function parseChaseDailySummary_(subject, text) {
+  var subjectLine = String(subject || '');
+  var body = normalizeText_(text);
+  var combined = normalizeText_(subjectLine + '\n' + body);
+
+  var account = body.match(/(?:^|\n)\s*Account ending in\b\s*:?\s*\(?\s*(?:\u2026|\.{3})\s*(\d{4})\s*\)?/i);
+  var subjectLast4 = subjectLine.match(/account ending in\s*\(?\s*(?:\u2026|\.{3})\s*(\d{4})\s*\)?/i);
+  var balance = body.match(/(?:^|\n)\s*End of Day Balance\b\s*:?\s*(\$[\d,]+\.\d{2})/i);
+  // "Account summary for Monday, Aug 10, 2026" — optional weekday, then month-name date.
+  var asOfRaw = combined.match(/Account summary for\s+(?:[A-Za-z]+,\s+)?([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})/i);
+
+  var last4 = account ? account[1] : (subjectLast4 ? subjectLast4[1] : '');
+  if (!last4 || !balance || !asOfRaw) {
+    return { outcome: 'needs_review', institution: 'Chase', reason: 'Incomplete Chase daily account summary' };
+  }
+
+  var balanceAsOf = parseMonthNameDate_(asOfRaw[1]);
+  var parsedBalance = parseAmount_(balance[1]);
+  if (!balanceAsOf || !Number.isFinite(parsedBalance)) {
+    return { outcome: 'needs_review', institution: 'Chase', reason: 'Invalid Chase daily summary date or balance' };
+  }
+
+  return { outcome: 'account_balance', account: {
+    institution: 'Chase',
+    last4: last4,
+    balance: parsedBalance,
+    balanceAsOf: balanceAsOf,
+    eventType: 'account_daily_summary'
+  }};
 }
 
 // Chase Zelle receipt, subject "You received money with Zelle(R)". Fields are
@@ -517,6 +553,10 @@ var TRANSACTION_HEADERS = ['Imported At','Transaction Date','Institution','Card 
 // 'Subject' and 'From' are recorded so a reviewer can judge an issue without
 // opening Gmail. Subject only -- never the body, per the privacy constraints.
 var ISSUE_HEADERS = ['Gmail Message ID','Email Received At','Institution','Subject','From','Reason','Open in Gmail','Parser Version'];
+// Current balances from daily summary alerts. Display Name is user-owned: left
+// blank on insert and never overwritten on update. Key is Institution + Last 4.
+var ACCOUNT_HEADERS = ['Institution','Last 4','Display Name','Balance','Balance As Of','Updated At','Gmail Message ID','Parser Version'];
+var UPDATE_ACCOUNT_BALANCES_SETTING = 'Update Account Balances';
 
 function getOrCreateSheet_(name, headers) {
   var ss = SpreadsheetApp.getActive(); var sheet = ss.getSheetByName(name) || ss.insertSheet(name);
@@ -599,8 +639,14 @@ function initializeWorkbook() {
     ['Gmail Message ID','Email Received At','Event Type','Parser Version','Fingerprint']
       .forEach(function (h) { tx.hideColumns(map[h], 1); });
   }
+  var accounts = getOrCreateSheet_('Accounts', ACCOUNT_HEADERS);
+  var accountsMap = getColumnMap_(accounts, ACCOUNT_HEADERS);
+  accounts.getRange(1, accountsMap['Balance'], accounts.getMaxRows(), 1).setNumberFormat('$#,##0.00');
+  accounts.getRange(1, accountsMap['Balance As Of'], accounts.getMaxRows(), 1).setNumberFormat('yyyy-mm-dd');
+  accounts.getRange(1, accountsMap['Updated At'], accounts.getMaxRows(), 1).setNumberFormat('yyyy-mm-dd hh:mm');
   getOrCreateSheet_('Setup', ['Setting','Value']); getOrCreateSheet_('Import Issues', ISSUE_HEADERS);
   ensureImportToggles_();
+  ensureUpdateAccountBalancesSetting_();
   ensureLabels_(); setStatus_('Initialized', new Date());
 }
 function transactionValues_(tx, message, fingerprint) {
@@ -640,6 +686,67 @@ function appendTransaction_(tx, message, fingerprint) {
     s.getRange(row, map[header]).setValue(values[header]);
   });
 }
+
+// Find Accounts row matching Institution + Last 4, or 0 if none.
+function findAccountRow_(sheet, map, institution, last4) {
+  var last = lastUsedRowIn_(sheet, ACCOUNT_HEADERS, map);
+  if (last < 2) return 0;
+  var instCol = map['Institution'];
+  var last4Col = map['Last 4'];
+  var minCol = Math.min(instCol, last4Col);
+  var maxCol = Math.max(instCol, last4Col);
+  var values = sheet.getRange(2, minCol, last - 1, maxCol - minCol + 1).getValues();
+  var instOffset = instCol - minCol;
+  var last4Offset = last4Col - minCol;
+  var wantInst = String(institution || '').trim().toLowerCase();
+  var wantLast4 = String(last4 || '').trim();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][instOffset]).trim().toLowerCase() === wantInst &&
+        String(values[i][last4Offset]).trim() === wantLast4) {
+      return i + 2;
+    }
+  }
+  return 0;
+}
+
+// Upsert current balance on Accounts. Display Name is never written. Older
+// as-of dates than the row already has are skipped so out-of-order mail cannot
+// regress the balance. Returns true if a row was written or updated.
+function balanceAsOfKey_(value) {
+  // Sheets may return a Date for a formatted date cell; normalize to yyyy-mm-dd.
+  if (value && typeof value.getFullYear === 'function' && !isNaN(value.getTime())) {
+    return value.getFullYear() + '-' +
+      String(value.getMonth() + 1).padStart(2, '0') + '-' +
+      String(value.getDate()).padStart(2, '0');
+  }
+  var s = String(value == null ? '' : value).trim();
+  var iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return iso ? iso[1] : s;
+}
+
+function upsertAccountBalance_(account, message) {
+  var s = getOrCreateSheet_('Accounts', ACCOUNT_HEADERS);
+  var map = getColumnMap_(s, ACCOUNT_HEADERS);
+  var row = findAccountRow_(s, map, account.institution, account.last4);
+  if (row > 0) {
+    var existingAsOf = balanceAsOfKey_(s.getRange(row, map['Balance As Of']).getValue());
+    // ISO yyyy-mm-dd compares lexicographically.
+    if (existingAsOf && String(account.balanceAsOf) < existingAsOf) return false;
+  } else {
+    row = lastUsedRowIn_(s, ACCOUNT_HEADERS, map) + 1;
+    if (row > s.getMaxRows()) s.insertRowsAfter(s.getMaxRows(), 1);
+    s.getRange(row, map['Institution']).setValue(account.institution);
+    s.getRange(row, map['Last 4']).setValue(account.last4);
+    // Display Name left blank for the user; never set here.
+  }
+  s.getRange(row, map['Balance']).setValue(account.balance);
+  s.getRange(row, map['Balance As Of']).setValue(account.balanceAsOf);
+  s.getRange(row, map['Updated At']).setValue(new Date().toISOString());
+  s.getRange(row, map['Gmail Message ID']).setValue(message.id || '');
+  s.getRange(row, map['Parser Version']).setValue(APP_CONFIG.parserVersion);
+  return true;
+}
+
 // Single-line, length-capped text for a spreadsheet cell. A leading =, +, - or
 // @ is prefixed with an apostrophe so an odd subject line cannot be interpreted
 // as a formula.
@@ -728,6 +835,29 @@ function ensureImportToggles_() {
   });
 }
 
+// Seed Update Account Balances as TRUE if absent. Never overwrite a Value.
+function ensureUpdateAccountBalancesSetting_() {
+  var s = getOrCreateSheet_('Setup', ['Setting', 'Value']);
+  var values = s.getDataRange().getValues();
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][0]) === UPDATE_ACCOUNT_BALANCES_SETTING) return;
+  }
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['TRUE', 'FALSE'], true)
+    .setAllowInvalid(false)
+    .build();
+  s.appendRow([UPDATE_ACCOUNT_BALANCES_SETTING, true]);
+  s.getRange(s.getLastRow(), 2).setDataValidation(rule);
+}
+
+// Missing Setup row → enabled (older sheets before the setting was seeded).
+// Present but blank/FALSE → disabled; daily summaries then take the Ignored path.
+function isUpdateAccountBalancesEnabled_() {
+  var value = readSetupSetting_(UPDATE_ACCOUNT_BALANCES_SETTING);
+  if (value === null) return true;
+  return isEnabledSetting_(value);
+}
+
 function enabledTrustedSenders_() {
   var all = APP_CONFIG.trustedSenders;
   var out = {};
@@ -763,7 +893,7 @@ function messageModel_(message) {
 }
 function importTransactionAlerts() {
   var lock = LockService.getScriptLock(); if (!lock.tryLock(1000)) return;
-  var counts={imported:0,ignored:0,review:0,errors:0};
+  var counts={imported:0,ignored:0,review:0,accounts:0,errors:0};
   try {
     initializeWorkbook(); var labels={}; Object.keys(APP_CONFIG.labels).forEach(function(k){labels[k]=GmailApp.getUserLabelByName(APP_CONFIG.labels[k]);});
     GmailApp.search(buildGmailQuery_(),0,50).forEach(function(thread){ thread.getMessages().forEach(function(msg){
@@ -776,6 +906,18 @@ function importTransactionAlerts() {
       try {
         var parsed=parseAlert(sender,msg.getSubject(),msg.getBody(),msg.getPlainBody());
         if(parsed.outcome==='imported'){ appendTransaction_(parsed.transaction,model,fingerprint_(parsed.transaction)); thread.addLabel(labels.imported); counts.imported++; setStatus_('Last Imported Transaction',parsed.transaction.transactionDate+' '+parsed.transaction.merchant); }
+        else if(parsed.outcome==='account_balance'){
+          if(!isUpdateAccountBalancesEnabled_()){ thread.addLabel(labels.ignored); counts.ignored++; }
+          else {
+            var wrote=upsertAccountBalance_(parsed.account,model);
+            thread.addLabel(labels.imported);
+            if(wrote){
+              counts.accounts++;
+              setStatus_('Last Account Balance Update',
+                parsed.account.institution+' \u2026'+parsed.account.last4+' $'+Number(parsed.account.balance).toFixed(2)+' as of '+parsed.account.balanceAsOf);
+            }
+          }
+        }
         else if(parsed.outcome==='ignored'){ thread.addLabel(labels.ignored); counts.ignored++; }
         else { recordIssue_(model,parsed.institution || trustedInstitution_(sender),parsed.reason); thread.addLabel(labels.review); counts.review++; }
       } catch(e) {
@@ -857,6 +999,7 @@ function showDiagnostics(){
   Object.keys(APP_CONFIG.importToggles).forEach(function(k){
     lines.push('  '+k+': '+(isInstitutionEnabled_(APP_CONFIG.importToggles[k]) ? 'TRUE' : 'FALSE'));
   });
+  lines.push('Update Account Balances: '+(isUpdateAccountBalancesEnabled_() ? 'TRUE' : 'FALSE'));
   lines.push('Trusted senders:');
   Object.keys(APP_CONFIG.trustedSenders).forEach(function(k){ lines.push('  '+k+' -> '+APP_CONFIG.trustedSenders[k]); });
 
@@ -880,10 +1023,26 @@ function showDiagnostics(){
     }
   }
 
+  var accountsSheet=SpreadsheetApp.getActive().getSheetByName('Accounts');
+  if(!accountsSheet){
+    lines.push('\nAccounts sheet: MISSING. Run Setup / Initialize.');
+  } else {
+    try {
+      var aMap=getColumnMap_(accountsSheet,ACCOUNT_HEADERS);
+      var aLast=lastUsedRowIn_(accountsSheet,ACCOUNT_HEADERS,aMap);
+      lines.push('\nAccounts sheet: OK ('+ACCOUNT_HEADERS.length+' columns)');
+      lines.push('Account rows: '+Math.max(0,aLast-1));
+    } catch(e){
+      lines.push('\nACCOUNTS HEADER PROBLEM:');
+      lines.push('  '+String(e.message||e));
+    }
+  }
+
   var lastError=getStatus_('Last Error');
   lines.push('\nLast checked: '+(getStatus_('Last Checked')||'never'));
   lines.push('Last result: '+(getStatus_('Last Result')||'n/a'));
   lines.push('Last imported: '+(getStatus_('Last Imported Transaction')||'none'));
+  lines.push('Last account balance: '+(getStatus_('Last Account Balance Update')||'none'));
   if(lastError) lines.push('LAST ERROR ('+(getStatus_('Last Error At')||'unknown time')+'): '+lastError);
 
   SpreadsheetApp.getUi().alert('Transaction Alerts Diagnostics',lines.join('\n'),SpreadsheetApp.getUi().ButtonSet.OK);

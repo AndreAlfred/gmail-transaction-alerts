@@ -72,7 +72,7 @@ Current parser coverage:
 4. **Chase outbound transfers** to another bank/account, e\.g\. subject `You sent $250.00 from account ending in (…5678)`\. Field labels: Account ending in / Sent on / Recipient / Amount\. Merchant is the recipient \(headline fallback: `You sent $… to RECIPIENT`\)\. Card Type is `transfer`; Event Type is `transfer_out`\. Amount is positive\.
 5. **Chase Zelle money received**, subject `You received money with Zelle®`, headline `NAME sent you money`\. Field labels: Amount / Sent on / Transaction number / Memo\. Merchant is the sender’s name, taken from the headline — there is no Sender or From row\. Card Type is `zelle`; Event Type is `zelle_received`; amount is positive\. This alert carries **no account number**, so Last 4 is blank\. Memo is deliberately not read\.
 6. **Chase scheduled credit\-card payments**, which are recognized but intentionally ignored because they are not merchant purchases\.
-7. **Chase daily account summaries**, subject `Your daily summary for account ending in (…NNNN)`, with End of Day Balance / Total Withdrawals / Total Deposits\. Recognized and ignored — balance totals are not merchant purchases — rather than sent to Needs Review\.
+7. **Chase daily account summaries**, subject `Your daily summary for account ending in (…NNNN)`, with End of Day Balance and an Account summary as\-of date\. Parsed as `account_balance` and **upserted onto the Accounts sheet** \(keyed by Institution \+ Last 4\) — never written to Transactions\. Incomplete summaries go to Needs Review\. Setup `Update Account Balances` = `FALSE` labels them Ignored instead\.
 8. **Venmo P2P payments** you sent \(`You paid NAME $X.XX`\) and **payments received** \(`NAME paid you $X.XX`\)\. Merchant is the counterparty\. Card Type is `payment` or `received`\. Amount is always positive; Event Type distinguishes direction \(`venmo_payment` / `venmo_payment_received`\)\. Payment alerts may carry Last 4 from `Payment Method` \(`account ending in ####`\); received alerts leave Last 4 blank\. Other Venmo mail goes to Needs Review\.
 9. **USAA bank\-account debit alerts**, subject `Debit Alert for Your USAA Bank Account`, wording `$X came out of your account ending in NNNN.` followed by To: and Date: rows\. Merchant is taken dynamically from the required To: destination\. If the To: row is missing, the alert goes to Needs Review rather than importing with a fabricated merchant\. Card Type is `bank debit` — not `debit`, which Chase debit\-*card* purchases already use\. Event Type is `account_debit`; amount is positive\. Cardholder is read from the security\-zone header on a best\-effort basis and left blank if that header changes shape\.
 10. **USAA bank\-account deposit alerts**, subject `Deposit to Your Bank Account`, wording `You received a deposit of $X to your account …NNNN.` followed by From:, To:, Date:, and Amount: rows\. Merchant is taken dynamically from the required From: origin\. If the From: row is missing, the alert goes to Needs Review rather than importing with a fabricated merchant\. Card Type is `deposit` and Event Type is `deposit`; amount is positive, with direction carried by Event Type as with debits and Chase transfers\. The account number is masked with an ellipsis — a literal `...` in the plain part, the `&#x2026;` entity in HTML — so the last\-4 pattern accepts both\. Cardholder comes from the same best\-effort security\-zone header as the debit alert\.
@@ -92,6 +92,21 @@ The Transactions sheet contains:
 - Amount
 
 Hidden audit columns contain Gmail message ID, email received time, event type, parser version, and transaction fingerprint\.
+
+### Accounts sheet
+
+`initializeWorkbook` creates an **Accounts** sheet for current balances from Chase daily summaries\. Columns \(by header name\):
+
+- Institution
+- Last 4
+- Display Name \(user\-owned; left blank on insert and never overwritten\)
+- Balance
+- Balance As Of
+- Updated At
+- Gmail Message ID \(last message that wrote the row\)
+- Parser Version
+
+Rows are upserted by **Institution \+ Last 4**\. An update applies only when the email’s as\-of date is **≥** the row’s current Balance As Of, so out\-of\-order mail cannot regress the balance\. Daily summaries never append to Transactions\.
 
 ### User\-added columns
 
@@ -123,7 +138,7 @@ Rows record `Gmail Message ID`, `Email Received At`, `Institution`, `Subject`, `
 
 ### Setup sheet configuration
 
-The Setup sheet holds both script\-written status \(`Last Checked`, `Last Result`, `Last Error`, `Last Imported Transaction`\) and **user\-editable config**: `Import USAA` / `Import Chase` / `Import Venmo`, seeded `TRUE` once and never overwritten by `initializeWorkbook`\. Setting one to `FALSE` drops that institution from the Gmail search, so its mail stays unlabeled and resumes on re\-enable within the 30\-day window\.
+The Setup sheet holds both script\-written status \(`Last Checked`, `Last Result`, `Last Error`, `Last Imported Transaction`, `Last Account Balance Update`\) and **user\-editable config**: `Import USAA` / `Import Chase` / `Import Venmo`, plus `Update Account Balances`, each seeded `TRUE` once and never overwritten by `initializeWorkbook`\. Setting an Import toggle to `FALSE` drops that institution from the Gmail search, so its mail stays unlabeled and resumes on re\-enable within the 30\-day window\. Setting `Update Account Balances` to `FALSE` leaves Chase purchase imports alone but labels daily summaries Ignored instead of upserting Accounts\.
 
 This is the established home for user\-editable config\. Add new settings here as `Setting` / `Value` rows following the same seed\-once\-never\-overwrite rule, rather than introducing a second config location\.
 
@@ -155,7 +170,7 @@ The script creates and uses:
 - `Bank Transactions/Ignored`
 - `Bank Transactions/Needs Review`
 
-A valid purchase is appended before its message/thread is labeled Imported\. Runtime failures remain without a terminal label so they can be retried\. Gmail message ID is the primary deduplication key\.
+A valid purchase is appended to Transactions before its message/thread is labeled Imported\. A successful Accounts balance upsert is also labeled Imported — the label means the script finished writing, not that a Transactions row exists\. Runtime failures remain without a terminal label so they can be retried\. Gmail message ID on the Transactions sheet is the primary deduplication key for purchase imports; balance emails rely on the Imported label \(and a date\-guarded upsert if reprocessed\)\.
 
 ## Scheduling and latency
 
@@ -228,7 +243,8 @@ Test suites live in `tests/`, one per institution plus two for sheet behavior an
 |`chase-purchase.test.js` |Chase credit and debit purchases, subject fallbacks, sender allowlist                                                                                          |
 |`chase-transfer.test.js` |Chase outbound transfers                                                                                                                                       |
 |`chase-zelle.test.js`    |Chase Zelle receipts, routing away from the transfer parser                                                                                                    |
-|`chase-daily-summary.test.js`|Chase daily account summaries ignored rather than Needs Review                                                                                              |
+|`chase-daily-summary.test.js`|Chase daily account summaries → account_balance payload                                                                                                     |
+|`accounts-upsert.test.js`|Accounts sheet insert/update/skip\-older, Display Name preservation, Setup balance toggle                                                                     |
 |`venmo.test.js`          |Venmo sent/received, HTML-over-plain body selection                                                                                                            |
 |`import-issues.test.js`  |Issue row contents, header migration, formula neutralization                                                                                                   |
 |`import-toggles.test.js` |Per-institution Setup toggles and query filtering                                                                                                              |
@@ -244,7 +260,7 @@ Do not maintain a list of individual test names here — it rots faster than any
 1. Run `initializeWorkbook()` twice and confirm idempotence\.
 2. Import Now against a real alert; confirm exactly one row and the Imported label\.
 3. Run again; confirm no duplicate\.
-4. Confirm a scheduled Chase payment and a Chase daily account summary both get Ignored and no transaction row\.
+4. Confirm a scheduled Chase payment gets Ignored and no transaction row\. Confirm a Chase daily summary upserts Accounts \(or is Ignored when `Update Account Balances` is FALSE\) and does not add a Transactions row\.
 5. Install, replace, and disable time triggers\.
 6. Confirm no email body or credentials appear in Setup or Import Issues\.
 
