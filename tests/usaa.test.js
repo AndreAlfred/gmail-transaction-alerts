@@ -1,5 +1,6 @@
 /**
- * USAA parser tests: bank-account debit alerts and purchase authorizations.
+ * USAA parser tests: bank-account debit and deposit alerts, plus card-purchase
+ * authorizations.
  *
  * Fixtures are synthetic. `usaa-account-debit-alert.txt` is the decoded
  * text/plain part of a real "Debit Alert for Your USAA Bank Account" message
@@ -84,6 +85,14 @@ test('account debit is extracted from HTML when the plain part is empty', () => 
   assert.deepStrictEqual({ ...result.transaction }, EXPECTED_DEBIT);
 });
 
+test('account debit does not require the unused To row', () => {
+  const withoutTo = DEBIT_PLAIN.replace(/To:\n\tUSAA DEBIT\n/, '');
+  assert.ok(!/USAA DEBIT/.test(withoutTo), 'fixture edit must remove the To row');
+  const result = parseAlert(BANK_SENDER, DEBIT_SUBJECT, '', withoutTo);
+  assert.strictEqual(result.outcome, 'imported');
+  assert.deepStrictEqual({ ...result.transaction }, EXPECTED_DEBIT);
+});
+
 test('deposit is extracted from the plain-text body', () => {
   const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', DEPOSIT_PLAIN);
   assert.strictEqual(result.outcome, 'imported');
@@ -99,11 +108,35 @@ test('deposit is extracted from HTML when the plain part is empty', () => {
   assert.deepStrictEqual({ ...result.transaction }, EXPECTED_DEPOSIT);
 });
 
+test('deposit does not require the unused From row', () => {
+  const withoutFrom = DEPOSIT_PLAIN.replace(/From:\n\tUSAA CREDIT\n/, '');
+  assert.ok(!/USAA CREDIT/.test(withoutFrom), 'fixture edit must remove the From row');
+  const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', withoutFrom);
+  assert.strictEqual(result.outcome, 'imported');
+  assert.deepStrictEqual({ ...result.transaction }, EXPECTED_DEPOSIT);
+});
+
+test('an account alert without a security-zone name imports a blank cardholder', () => {
+  const withoutSecurityZone = DEBIT_PLAIN.replace(
+    /USAA SECURITY ZONE\s+Jordan\s+Sample\s+USAA # ending in: 4321\s*/,
+    ''
+  );
+  assert.ok(!/USAA SECURITY ZONE/.test(withoutSecurityZone),
+    'fixture edit must remove the security-zone header');
+  const result = parseAlert(BANK_SENDER, DEBIT_SUBJECT, '', withoutSecurityZone);
+  assert.strictEqual(result.outcome, 'imported');
+  assert.deepStrictEqual({ ...result.transaction }, {
+    ...EXPECTED_DEBIT,
+    cardholder: ''
+  });
+});
+
 test('a deposit missing its Date field goes to review', () => {
   const withoutDate = DEPOSIT_PLAIN.replace(/Date:\n\t08\/10\/26\n/, '');
   assert.ok(!/08\/10\/26/.test(withoutDate), 'fixture edit must remove the date');
   const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', withoutDate);
   assert.strictEqual(result.outcome, 'needs_review');
+  assert.strictEqual(result.reason, 'Unsupported or incomplete USAA deposit alert');
 });
 
 test('a deposit missing its amount goes to review', () => {
@@ -113,6 +146,7 @@ test('a deposit missing its amount goes to review', () => {
   );
   const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', withoutAmount);
   assert.strictEqual(result.outcome, 'needs_review');
+  assert.strictEqual(result.reason, 'Unsupported or incomplete USAA alert');
 });
 
 test('a deposit does not get misrouted to the account-debit parser', () => {
@@ -133,6 +167,7 @@ test('an account debit missing its Date field goes to review', () => {
   assert.ok(!/08\/04\/26/.test(withoutDate), 'fixture edit must remove the date');
   const result = parseAlert(BANK_SENDER, DEBIT_SUBJECT, '', withoutDate);
   assert.strictEqual(result.outcome, 'needs_review');
+  assert.strictEqual(result.reason, 'Unsupported or incomplete USAA account alert');
 });
 
 test('an account debit missing its amount goes to review', () => {
@@ -142,6 +177,7 @@ test('an account debit missing its amount goes to review', () => {
   );
   const result = parseAlert(BANK_SENDER, DEBIT_SUBJECT, '', withoutAmount);
   assert.strictEqual(result.outcome, 'needs_review');
+  assert.strictEqual(result.reason, 'Unsupported or incomplete USAA account alert');
 });
 
 test('a lookalike of the bank sender is rejected', () => {
