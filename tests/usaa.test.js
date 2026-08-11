@@ -55,7 +55,7 @@ const EXPECTED_DEPOSIT = {
   cardType: 'deposit',
   last4: '3344',
   cardholder: 'Casey Rivers',
-  merchant: 'USAA Deposit',
+  merchant: 'USAA CREDIT',
   amount: 42.10,
   eventType: 'deposit'
 };
@@ -66,7 +66,7 @@ const EXPECTED_DEBIT = {
   cardType: 'bank debit',
   last4: '7788',
   cardholder: 'Jordan Sample',
-  merchant: 'USAA Bank Debit',
+  merchant: 'USAA DEBIT',
   amount: 88.45,
   eventType: 'account_debit'
 };
@@ -85,12 +85,22 @@ test('account debit is extracted from HTML when the plain part is empty', () => 
   assert.deepStrictEqual({ ...result.transaction }, EXPECTED_DEBIT);
 });
 
-test('account debit does not require the unused To row', () => {
+test('account debit missing its required To row goes to review', () => {
   const withoutTo = DEBIT_PLAIN.replace(/To:\n\tUSAA DEBIT\n/, '');
   assert.ok(!/USAA DEBIT/.test(withoutTo), 'fixture edit must remove the To row');
   const result = parseAlert(BANK_SENDER, DEBIT_SUBJECT, '', withoutTo);
+  assert.strictEqual(result.outcome, 'needs_review');
+  assert.strictEqual(result.reason, 'Unsupported or incomplete USAA account alert');
+});
+
+test('account debit merchant is taken dynamically from the To row', () => {
+  const differentMerchant = DEBIT_PLAIN.replace(
+    /To:\n\tUSAA DEBIT\n/,
+    'To:\n\tSAMPLE ELECTRIC COMPANY\n'
+  );
+  const result = parseAlert(BANK_SENDER, DEBIT_SUBJECT, '', differentMerchant);
   assert.strictEqual(result.outcome, 'imported');
-  assert.deepStrictEqual({ ...result.transaction }, EXPECTED_DEBIT);
+  assert.strictEqual(result.transaction.merchant, 'SAMPLE ELECTRIC COMPANY');
 });
 
 test('deposit is extracted from the plain-text body', () => {
@@ -108,12 +118,22 @@ test('deposit is extracted from HTML when the plain part is empty', () => {
   assert.deepStrictEqual({ ...result.transaction }, EXPECTED_DEPOSIT);
 });
 
-test('deposit does not require the unused From row', () => {
+test('deposit missing its required From row goes to review', () => {
   const withoutFrom = DEPOSIT_PLAIN.replace(/From:\n\tUSAA CREDIT\n/, '');
   assert.ok(!/USAA CREDIT/.test(withoutFrom), 'fixture edit must remove the From row');
   const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', withoutFrom);
+  assert.strictEqual(result.outcome, 'needs_review');
+  assert.strictEqual(result.reason, 'Unsupported or incomplete USAA deposit alert');
+});
+
+test('deposit merchant is taken dynamically from the From row', () => {
+  const differentMerchant = DEPOSIT_PLAIN.replace(
+    /From:\n\tUSAA CREDIT\n/,
+    'From:\n\tSAMPLE EMPLOYER PAYROLL\n'
+  );
+  const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', differentMerchant);
   assert.strictEqual(result.outcome, 'imported');
-  assert.deepStrictEqual({ ...result.transaction }, EXPECTED_DEPOSIT);
+  assert.strictEqual(result.transaction.merchant, 'SAMPLE EMPLOYER PAYROLL');
 });
 
 test('an account alert without a security-zone name imports a blank cardholder', () => {
@@ -153,7 +173,7 @@ test('a deposit does not get misrouted to the account-debit parser', () => {
   const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', DEPOSIT_PLAIN);
   assert.strictEqual(result.outcome, 'imported');
   assert.strictEqual(result.transaction.eventType, 'deposit');
-  assert.notStrictEqual(result.transaction.merchant, 'USAA Bank Debit');
+  assert.strictEqual(result.transaction.merchant, 'USAA CREDIT');
 });
 
 test('mailcenter.usaa.com is a trusted USAA sender', () => {
