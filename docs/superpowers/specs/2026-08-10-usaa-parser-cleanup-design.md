@@ -87,9 +87,14 @@ cardholder, and derive card type from the message rather than fixed metadata.
 
 The refactor preserves the existing failure boundaries:
 
-- an incomplete bank-account debit returns `Unsupported or incomplete USAA
-  account alert`
-- an incomplete deposit returns `Unsupported or incomplete USAA deposit alert`
+- an incomplete bank-account debit that retains its routing phrase returns
+  `Unsupported or incomplete USAA account alert`
+- an incomplete deposit that retains its routing phrase returns `Unsupported
+  or incomplete USAA deposit alert`
+- content that no longer contains a recognized account-alert routing phrase
+  falls through to the card parser and returns `Unsupported or incomplete USAA
+  alert`; notably, the existing missing-deposit-amount fixture mutation removes
+  `received a deposit of` and takes this path
 - an invalid account-activity date or amount returns `Invalid USAA date or
   amount`
 - an incomplete or invalid card purchase retains its current reason
