@@ -102,18 +102,22 @@ fixed merchant labels remain product conventions rather than extracted values.
 
 ## Tests
 
-Implementation will follow a red-green-refactor cycle in `tests/usaa.test.js`:
+Implementation will keep observable behavior green throughout the refactor in
+`tests/usaa.test.js`:
 
-1. Add an architectural regression that requires the three semantic parser
-   names and removes the ambiguous `parseUsaaPurchase_` name. Confirm it fails
-   against the current implementation for the expected naming reason.
-2. Add characterization coverage for shared account-alert behavior, including
+1. Add characterization coverage for shared account-alert behavior, including
    the deliberate non-requirement of the debit `To` row and deposit `From` row,
-   and the best-effort blank cardholder behavior.
-3. Rename the parsers and introduce the narrow helper while keeping all
-   existing fixture assertions green.
-4. Run `node --test tests/usaa.test.js` during the refactor.
-5. Run `node --test tests/*.test.js` before completion.
+   and the best-effort blank cardholder behavior. Confirm those tests pass
+   against the current implementation before restructuring it.
+2. Rename the parsers and introduce the narrow helper while keeping all
+   existing and new fixture assertions green.
+3. Run `node --test tests/usaa.test.js` after each refactoring step.
+4. Run `node --test tests/*.test.js` before completion.
+
+The suite will not assert private function names or grep source text. Such a
+test would reject an intentional redesign without proving any parsing behavior.
+Semantic naming and removal of the old ambiguous name will instead be checked
+in the implementation diff, while tests protect routing and returned values.
 
 The existing synthetic plain-text and HTML fixtures remain authoritative. No
 real email body, merchant/amount pair, account digits, message ID, or personal
