@@ -38,7 +38,7 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.8.0',
+  parserVersion: '1.8.1',
   // USAA now sends from mailcenter; the older omem subdomain is retired and
   // was removed deliberately. Entries are matched as exact addresses -- adding
   // or correcting one is the supported fix for a rejected sender; loosening the
@@ -157,8 +157,8 @@ function parseAlert(sender, subject, htmlBody, plainBody) {
 // falls through to the purchase parser and on to review.
 function parseUsaa_(text) {
   if (/came out of your account ending in/i.test(text)) return parseUsaaAccountDebit_(text);
-  if (/received a deposit of/i.test(text)) return parseUsaaDeposit_(text);
-  return parseUsaaPurchase_(text);
+  if (/received a deposit of/i.test(text)) return parseUsaaAccountDeposit_(text);
+  return parseUsaaCardPurchase_(text);
 }
 
 // The security-zone header carries the account holder's name between the
@@ -170,6 +170,24 @@ function parseUsaa_(text) {
 function usaaSecurityZoneName_(text) {
   var m = String(text).match(/USAA SECURITY ZONE\s*([\s\S]*?)\s*USAA\s*#\s*ending\s+in\s*:?\s*\d{4}/i);
   return m ? m[1].replace(/\s+/g, ' ').trim() : '';
+}
+
+function parseUsaaAccountActivity_(text, activityPattern, details) {
+  var activity = text.match(activityPattern);
+  var date = text.match(/Date\s*:\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+  if (!activity || !date) {
+    return { outcome: 'needs_review', institution: 'USAA', reason: details.incompleteReason };
+  }
+  var parsedDate = parseUsDate_(date[1]);
+  var amount = parseAmount_(activity[1]);
+  if (!parsedDate || !Number.isFinite(amount)) {
+    return { outcome: 'needs_review', institution: 'USAA', reason: 'Invalid USAA date or amount' };
+  }
+  return { outcome: 'imported', transaction: {
+    transactionDate: parsedDate, institution: 'USAA', cardType: details.cardType,
+    last4: activity[2], cardholder: usaaSecurityZoneName_(text), merchant: details.merchant,
+    amount: amount, eventType: details.eventType
+  }};
 }
 
 // Bank-account debit alert, subject "Debit Alert for Your USAA Bank Account".
@@ -185,17 +203,16 @@ function usaaSecurityZoneName_(text) {
 // Chase transfers and Venmo receipts. Card Type is "bank debit", not "debit",
 // because Chase debit-card purchases already use "debit".
 function parseUsaaAccountDebit_(text) {
-  var debit = text.match(/(\$[\d,]+(?:\.\d{2})?)\s+came out of your account ending in\s+(\d{4})/i);
-  var date = text.match(/Date\s*:\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
-  if (!debit || !date) return { outcome: 'needs_review', institution: 'USAA', reason: 'Unsupported or incomplete USAA account alert' };
-  var parsedDate = parseUsDate_(date[1]);
-  var amount = parseAmount_(debit[1]);
-  if (!parsedDate || !Number.isFinite(amount)) return { outcome: 'needs_review', institution: 'USAA', reason: 'Invalid USAA date or amount' };
-  return { outcome: 'imported', transaction: {
-    transactionDate: parsedDate, institution: 'USAA', cardType: 'bank debit',
-    last4: debit[2], cardholder: usaaSecurityZoneName_(text), merchant: 'USAA Bank Debit',
-    amount: amount, eventType: 'account_debit'
-  }};
+  return parseUsaaAccountActivity_(
+    text,
+    /(\$[\d,]+(?:\.\d{2})?)\s+came out of your account ending in\s+(\d{4})/i,
+    {
+      cardType: 'bank debit',
+      merchant: 'USAA Bank Debit',
+      eventType: 'account_debit',
+      incompleteReason: 'Unsupported or incomplete USAA account alert'
+    }
+  );
 }
 
 // Bank-account deposit alert, subject "Deposit to Your Bank Account". Body
@@ -211,21 +228,20 @@ function parseUsaaAccountDebit_(text) {
 // and not required. Card Type is "deposit", distinct from the debit alert's
 // "bank debit", because the two are opposite directions on the same account
 // and should read that way in the sheet.
-function parseUsaaDeposit_(text) {
-  var deposit = text.match(/received a deposit of\s+(\$[\d,]+(?:\.\d{2})?)\s+to your account\s+(?:…|\.{3})\s*(\d{4})/i);
-  var date = text.match(/Date\s*:\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
-  if (!deposit || !date) return { outcome: 'needs_review', institution: 'USAA', reason: 'Unsupported or incomplete USAA deposit alert' };
-  var parsedDate = parseUsDate_(date[1]);
-  var amount = parseAmount_(deposit[1]);
-  if (!parsedDate || !Number.isFinite(amount)) return { outcome: 'needs_review', institution: 'USAA', reason: 'Invalid USAA date or amount' };
-  return { outcome: 'imported', transaction: {
-    transactionDate: parsedDate, institution: 'USAA', cardType: 'deposit',
-    last4: deposit[2], cardholder: usaaSecurityZoneName_(text), merchant: 'USAA Deposit',
-    amount: amount, eventType: 'deposit'
-  }};
+function parseUsaaAccountDeposit_(text) {
+  return parseUsaaAccountActivity_(
+    text,
+    /received a deposit of\s+(\$[\d,]+(?:\.\d{2})?)\s+to your account\s+(?:…|\.{3})\s*(\d{4})/i,
+    {
+      cardType: 'deposit',
+      merchant: 'USAA Deposit',
+      eventType: 'deposit',
+      incompleteReason: 'Unsupported or incomplete USAA deposit alert'
+    }
+  );
 }
 
-function parseUsaaPurchase_(text) {
+function parseUsaaCardPurchase_(text) {
   var charge = text.match(/Your\s+(.+?)\s+\.{3}\s*(\d{4})\s+was charged\s+(\$[\d,]+(?:\.\d{2})?)\s+at\s+(.+?)(?=\n\s*Date\s*:)/i);
   var date = text.match(/Date\s*:\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
   var holder = text.match(/Cardholder\s*name\s*:\s*([^\n]+)/i);
