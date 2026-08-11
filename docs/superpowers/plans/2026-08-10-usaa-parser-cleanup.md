@@ -62,7 +62,7 @@ test('a deposit missing its amount goes to review', () => {
   );
   const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', withoutAmount);
   assert.strictEqual(result.outcome, 'needs_review');
-  assert.strictEqual(result.reason, 'Unsupported or incomplete USAA deposit alert');
+  assert.strictEqual(result.reason, 'Unsupported or incomplete USAA alert');
 });
 
 test('an account debit missing its Date field goes to review', () => {
