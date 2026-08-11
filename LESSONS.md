@@ -30,6 +30,12 @@ This is a living file. Add to it when a bug or review turns up something that wa
 
 **How to apply.** When a user reports a side effect, find where it is emitted and what must have already succeeded for control to reach that line. Side effects ordered after the real work are proof the work happened; the same side effect emitted first would have proved nothing. When adding a new side effect, place it after the operation it is meant to attest to — it becomes a free diagnostic later.
 
+### The Imported label is not synonymous with a Transactions row
+
+**What happened.** Chase daily account summaries upsert the Accounts sheet and then receive the same `Bank Transactions/Imported` label as purchase imports. Inferring “there must be a new Transactions row” from that label alone is wrong for balance emails; the label only means the script finished its write path for that message.
+
+**How to apply.** When diagnosing “Imported but I don’t see it,” check Setup `Last Result` / `Last Account Balance Update` and the Accounts sheet as well as Transactions. Do not use the Imported label to decide which sheet was written.
+
 ### Gmail labels are account-wide; sheet writes are not
 
 A user with two copies of the workbook can see correctly labeled mail and an apparently empty sheet, because the labels are global to the Gmail account while `SpreadsheetApp.getActive()` resolves to whichever spreadsheet the script is bound to. Diagnostics prints the workbook name and ID so this is one glance to confirm rather than a long hunt.
