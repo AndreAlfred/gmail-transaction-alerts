@@ -52,7 +52,7 @@ Fixtures are synthetic. **Never commit a real alert email, real merchant/amount 
 
 ## Releasing
 
-The release version is `APP_CONFIG.parserVersion` in `gmail-transaction-alerts-Code.gs` (must match the `.txt` copy). Tags and GitHub Releases use `{parserVersion}` with no `v` prefix (e.g. `1.1.0`).
+The release version is `APP_CONFIG.parserVersion` in `gmail-transaction-alerts-Code.gs`. Tags and GitHub Releases use `{parserVersion}` with no `v` prefix (e.g. `1.1.0`).
 
 **When you change the script** (`gmail-transaction-alerts-Code.gs`):
 
