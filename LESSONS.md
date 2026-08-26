@@ -100,6 +100,12 @@ The alternative — regexing across the raw blob — would match the wrong thing
 
 **How to apply.** Merchant is the deposit type the alert states about itself, captured from the `You have a <type> deposit of $X` headline (subject as fallback) — `direct deposit`, `mobile deposit`. Read it, do not hardcode it: a hardcoded `direct deposit` silently mislabels every other deposit type. This is the same rule as USAA's dynamic `To:`/`From:` merchants, applied where the only honest source is the message's own description of the event.
 
+### Amex large-purchase alerts do not use labeled rows, and the first dollar amount is the wrong one
+
+**What happened.** Amex "Large Purchase Approved" mail has no Merchant / Amount / Date labels. After `htmlToText_`, the charge is three unlabeled lines: merchant, `$12.34*` (asterisk marks a pre-authorization), and a weekday-prefixed date (`Wed, Mar 7, 2026`). Earlier in the same body the alert says the purchase was "more than $1.00" — that is the user's notification threshold, not the charge. `Account Ending` is typically five digits. The subject line carries none of merchant, amount, or date.
+
+**How to apply.** Pair the merchant line with the amount that sits next to the weekday date; ignore "more than $X". Capture only the `Mon D, YYYY` portion for `parseMonthNameDate_` — the weekday prefix makes the whole cell fail that function's `^...$` anchor. Store Account Ending as shown (4–5 digits) in Last 4 rather than truncating. Cardholder comes from `Dear NAME,` and stays blank if that greeting is missing. Do not invent a product name; Card Type is `credit`. Other mail from the Amex sender goes to Needs Review. Keep the threshold dollar figure in the fixture so a first-match `$` regex fails the test.
+
 ### Prefer a fallback source over a failed parse, but never invent a value
 
 Credit merchant and amount also appear in the subject line; debit amount appears in the subject and merchant in the body headline. Falling back to those is recovering a value from a second real source — not the same as fabricating one. Chase alerts genuinely contain no cardholder name, so that field is left empty. Missing data goes to Needs Review or stays blank; it never gets guessed.
@@ -124,7 +130,7 @@ The allowlist is a security boundary, not a convenience. A lookalike sender (`al
 
 USAA migrated from `omem.usaa.com` to `mailcenter.usaa.com`. The PR that made that change edited `APP_CONFIG.trustedSenders` and nothing else, which left `main` with four failing tests and a `README.md` still advertising the dead address. The merge went in regardless, so the `tests` check was not enforced at the time.
 
-The address is referenced from `APP_CONFIG.trustedSenders`, `tests/import-toggles.test.js` (a `deepStrictEqual` on the whole enabled-sender key set, plus a query-string match), `tests/chase-purchase.test.js` (the case-insensitivity test and the lookalike-rejection list), `tests/usaa.test.js`, and the `README.md` sender table. **Grep for the address before changing it** rather than editing the config alone.
+The address is referenced from `APP_CONFIG.trustedSenders`, `tests/import-toggles.test.js` (a `deepStrictEqual` on the whole enabled-sender key set, plus a query-string match), `tests/chase-purchase.test.js` (the case-insensitivity test and the lookalike-rejection list), `tests/usaa.test.js`, `tests/amex.test.js`, and the `README.md` sender table. **Grep for the address before changing it** rather than editing the config alone.
 
 Two things make this expensive to notice. An unlisted sender is not an error — it produces an "Untrusted sender" row in Import Issues, so affected alerts simply stop appearing and the symptom reads as "nothing is importing." And the lookalike-rejection tests keep passing after a botched swap, because a lookalike of a *no-longer-trusted* address is still correctly rejected; they stop testing anything useful without going red.
 

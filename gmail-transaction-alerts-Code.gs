@@ -26,7 +26,9 @@
  *   alerts, Merchant is taken from the value after From:; Card Type is "deposit"
  *   and Event Type is deposit.
  *   Chase and Venmo alerts do not include a cardholder name, so that cell is
- *   blank on those rows. Chase outbound transfers use Card Type "transfer"
+ *   blank on those rows. Amex large-purchase alerts take Cardholder from the
+ *   Dear greeting when present; Card Type is "credit"; Last 4 stores Account
+ *   Ending as shown (often five digits). Chase outbound transfers use Card Type "transfer"
  *   and Event Type transfer_out; Merchant is the recipient. Chase Zelle
  *   receipts use Card Type "zelle" and Event Type zelle_received; Merchant is
  *   the sender, and Last 4 is blank because the alert has no account number.
@@ -42,7 +44,7 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.11.0',
+  parserVersion: '1.12.0',
   // USAA now sends from mailcenter; the older omem subdomain is retired and
   // was removed deliberately. Entries are matched as exact addresses -- adding
   // or correcting one is the supported fix for a rejected sender; loosening the
@@ -51,14 +53,16 @@ var APP_CONFIG = Object.freeze({
   trustedSenders: Object.freeze({
     'usaa.customer.service@mailcenter.usaa.com': 'USAA',
     'no.reply.alerts@chase.com': 'Chase',
-    'venmo@venmo.com': 'Venmo'
+    'venmo@venmo.com': 'Venmo',
+    'americanexpress@welcome.americanexpress.com': 'Amex'
   }),
   // Setup sheet rows that gate which institutions are searched. Seeded as TRUE
   // once; initialize never overwrites an existing Value.
   importToggles: Object.freeze({
     'Import USAA': 'USAA',
     'Import Chase': 'Chase',
-    'Import Venmo': 'Venmo'
+    'Import Venmo': 'Venmo',
+    'Import Amex': 'Amex'
   }),
   supportedIntervals: Object.freeze([1, 5, 10, 15, 30, 60]),
   labels: Object.freeze({
@@ -149,9 +153,12 @@ function parseAlert(sender, subject, htmlBody, plainBody) {
   // Venmo's useful content lives in HTML; synthesized plain from Gmail can be
   // non-empty but flattened so Date is not on its own line. Prefer HTML.
   if (institution === 'Venmo' && htmlText) text = htmlText;
+  // Amex alerts are HTML-only (no useful text/plain part).
+  if (institution === 'Amex' && htmlText) text = htmlText;
   if (institution === 'USAA') return parseUsaa_(text);
   if (institution === 'Chase') return parseChase_(subject, text);
   if (institution === 'Venmo') return parseVenmo_(subject, text);
+  if (institution === 'Amex') return parseAmex_(subject, text);
   return { outcome: 'needs_review', institution: institution, reason: 'Unsupported institution' };
 }
 
@@ -620,6 +627,50 @@ function parseVenmo_(subject, text) {
   }};
 }
 
+// Amex "Large Purchase Approved" / "purchase on your Card". Fields are unlabeled
+// sibling cells: merchant, then $amount* (asterisk marks a pre-auth), then a
+// weekday-prefixed date. The body also names a notification threshold
+// ("more than $1.00") that must not be read as the charge. Account Ending is
+// typically five digits; Last 4 stores that value as shown. Cardholder is the
+// Dear greeting, best-effort. Card Type is "credit" -- the alert names no
+// product. Other Amex mail from this sender goes to review.
+function parseAmex_(subject, text) {
+  var combined = normalizeText_((subject || '') + '\n' + text);
+  if (!/purchase approved/i.test(subject || '') &&
+      !/purchase on your Card/i.test(combined) &&
+      !/large purchase/i.test(combined)) {
+    return { outcome: 'needs_review', institution: 'Amex', reason: 'Unsupported Amex alert format' };
+  }
+  return parseAmexPurchase_(text);
+}
+
+function parseAmexPurchase_(text) {
+  var body = normalizeText_(text);
+  var block = body.match(
+    /(?:^|\n)\s*([^\n]+)\n\s*(\$[\d,]+(?:\.\d{2})?)\s*\*?\s*\n\s*(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat),?\s+([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})/i
+  );
+  if (!block) {
+    return { outcome: 'needs_review', institution: 'Amex', reason: 'Unsupported or incomplete Amex purchase alert' };
+  }
+  var parsedDate = parseMonthNameDate_(block[3]);
+  var parsedAmount = parseAmount_(block[2]);
+  if (!parsedDate || !Number.isFinite(parsedAmount)) {
+    return { outcome: 'needs_review', institution: 'Amex', reason: 'Invalid Amex date or amount' };
+  }
+  var ending = body.match(/Account Ending:\s*(\d{4,5})/i);
+  var holder = body.match(/\bDear\s+([^,\n]+),/i);
+  return { outcome: 'imported', transaction: {
+    transactionDate: parsedDate,
+    institution: 'Amex',
+    cardType: 'credit',
+    last4: ending ? ending[1] : '',
+    cardholder: holder ? holder[1].replace(/\s+/g, ' ').trim() : '',
+    merchant: String(block[1]).trim(),
+    amount: parsedAmount,
+    eventType: 'purchase_authorization'
+  }};
+}
+
 // ===== appsscript/Workbook.gs =====
 var TRANSACTION_HEADERS = ['Imported At','Transaction Date','Institution','Card Type','Last 4','Cardholder','Merchant','Amount','Gmail Message ID','Email Received At','Event Type','Parser Version','Fingerprint'];
 // 'Subject' and 'From' are recorded so a reviewer can judge an issue without
@@ -890,7 +941,7 @@ function isInstitutionEnabled_(institution) {
   return isEnabledSetting_(value);
 }
 
-// Seed Import USAA / Chase / Venmo as TRUE if absent. Never overwrite a Value.
+// Seed Import USAA / Chase / Venmo / Amex as TRUE if absent. Never overwrite a Value.
 function ensureImportToggles_() {
   var s = getOrCreateSheet_('Setup', ['Setting', 'Value']);
   var values = s.getDataRange().getValues();
