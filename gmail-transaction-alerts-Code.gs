@@ -30,6 +30,9 @@
  *   and Event Type transfer_out; Merchant is the recipient. Chase Zelle
  *   receipts use Card Type "zelle" and Event Type zelle_received; Merchant is
  *   the sender, and Last 4 is blank because the alert has no account number.
+ *   Chase deposit alerts use Card Type "deposit" and Event Type deposit, the
+ *   same as USAA deposits; the alert names no payer, so Merchant is the
+ *   deposit type it reports ("direct deposit").
  *   Chase daily account summaries update the Accounts sheet (Balance / As Of)
  *   and never write a Transactions row. Venmo amounts are always positive;
  *   Event Type is venmo_payment (you paid) or venmo_payment_received (someone
@@ -39,7 +42,7 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.10.0',
+  parserVersion: '1.11.0',
   // USAA now sends from mailcenter; the older omem subdomain is retired and
   // was removed deliberately. Entries are matched as exact addresses -- adding
   // or correcting one is the supported fix for a rejected sender; loosening the
@@ -283,6 +286,13 @@ function parseChase_(subject, text) {
   if (/\bsent you money\b/i.test(combined)) {
     return parseChaseZelleReceived_(text);
   }
+  // Incoming deposits: "Deposit posted" badge / "You have a <type> deposit of
+  // $X". Checked before the transfer branch and before the purchase
+  // fallthrough, either of which would record arriving money as money spent.
+  if (/(?:^|\n)\s*Deposit posted\b/i.test(combined) ||
+      /You have an?\s+[A-Za-z][A-Za-z ]*?deposit of\s+\$/i.test(combined)) {
+    return parseChaseDeposit_(subject, text);
+  }
   // Outbound transfers: "You sent $X to RECIPIENT" / Transfer alert badge.
   // Distinct from purchases (Merchant|Description) and card payments.
   if (/You sent\s+\$[\d,]+(?:\.\d{2})?/i.test(combined) || /(?:^|\n)\s*Transfer alert\b/i.test(combined)) {
@@ -368,6 +378,68 @@ function parseChaseZelleReceived_(text) {
     merchant: String(sender[1]).trim(),
     amount: parsedAmount,
     eventType: 'zelle_received'
+  }};
+}
+
+// Chase incoming-deposit (income) alert, subject
+// "Your $X <type> deposit posted to account ending in (...NNNN)". Fields are
+// the same nested two-cell rows as every other Chase alert, so label and value
+// land on consecutive lines after htmlToText_ and the regexes bridge with \s*.
+// Labels here are Account ending in / Posted / Amount.
+//
+// The Posted value carries a time and timezone -- "Aug 21, 2026 at 4:02 AM ET"
+// -- and parseMonthNameDate_ is anchored, so the pattern captures only the
+// date portion and lets the rest fall away.
+//
+// This alert names no payer: no employer, no originator, no memo, nowhere.
+// The only thing it says about where the money came from is the deposit type
+// in its headline ("You have a direct deposit of $X"), so that is what lands
+// in Merchant -- read from the message rather than hardcoded, so a mobile or
+// other deposit reports itself accurately. Cardholder stays blank, as with
+// every Chase alert.
+//
+// Card Type and Event Type are both "deposit", matching USAA deposit alerts
+// so income filters the same way across institutions. Amount stays positive
+// with direction carried by Event Type.
+function parseChaseDeposit_(subject, text) {
+  var subjectLine = String(subject || '');
+  var body = normalizeText_(text);
+  var combined = normalizeText_(subjectLine + '\n' + body);
+
+  var account = body.match(/(?:^|\n)\s*Account(?:\s+ending\s+in)?\b\s*:?\s*([^\n]*?)\s*\(?\s*(?:…|\.{3})\s*(\d{4})\s*\)?\s*(?:\n|$)/i);
+  var date = body.match(/(?:^|\n)\s*Posted\b\s*:?\s*([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})/i);
+  var amount = body.match(/(?:^|\n)\s*Amount\b\s*:?\s*(\$[\d,]+\.\d{2})/i);
+
+  // Headline: "You have a direct deposit of $2,450.00"
+  var headline = combined.match(/You have an?\s+([A-Za-z][A-Za-z ]*?deposit)\s+of\s+(\$[\d,]+(?:\.\d{2})?)/i);
+  // Subject: "Your $2,450.00 direct deposit posted to account ending in (...4321)"
+  // Matched against the subject alone: the body carries a "Deposit posted"
+  // badge that would otherwise supply a bare "Deposit" as the type.
+  var subjectType = subjectLine.match(/([A-Za-z][A-Za-z ]*?deposit)\s+posted\b/i);
+  var subjectLast4 = subjectLine.match(/account ending in\s*\(?\s*(?:…|\.{3})\s*(\d{4})\s*\)?/i);
+
+  var depositType = headline ? headline[1] : (subjectType ? subjectType[1] : '');
+  if (!amount && headline) amount = [null, headline[2]];
+
+  if (!date || !amount || !depositType) {
+    return { outcome: 'needs_review', institution: 'Chase', reason: 'Unsupported Chase alert format' };
+  }
+
+  var parsedDate = parseMonthNameDate_(date[1]);
+  var parsedAmount = parseAmount_(amount[1]);
+  if (!parsedDate || !Number.isFinite(parsedAmount)) {
+    return { outcome: 'needs_review', institution: 'Chase', reason: 'Invalid Chase date or amount' };
+  }
+
+  return { outcome: 'imported', transaction: {
+    transactionDate: parsedDate,
+    institution: 'Chase',
+    cardType: 'deposit',
+    last4: account ? account[2] : (subjectLast4 ? subjectLast4[1] : ''),
+    cardholder: '',
+    merchant: String(depositType).trim(),
+    amount: parsedAmount,
+    eventType: 'deposit'
   }};
 }
 
