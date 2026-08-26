@@ -66,8 +66,10 @@ test('missing Import rows default each institution to enabled', () => {
   assert.strictEqual(ctx.isInstitutionEnabled_('USAA'), true);
   assert.strictEqual(ctx.isInstitutionEnabled_('Chase'), true);
   assert.strictEqual(ctx.isInstitutionEnabled_('Venmo'), true);
+  assert.strictEqual(ctx.isInstitutionEnabled_('Amex'), true);
   const senders = ctx.enabledTrustedSenders_();
   assert.deepStrictEqual(Object.keys(senders).sort(), [
+    'americanexpress@welcome.americanexpress.com',
     'no.reply.alerts@chase.com',
     'usaa.customer.service@mailcenter.usaa.com',
     'venmo@venmo.com'
@@ -78,12 +80,14 @@ test('enabledTrustedSenders_ drops Chase when Import Chase is FALSE', () => {
   const ctx = loadBundle([
     ['Import USAA', true],
     ['Import Chase', false],
-    ['Import Venmo', 'TRUE']
+    ['Import Venmo', 'TRUE'],
+    ['Import Amex', true]
   ]);
   const senders = ctx.enabledTrustedSenders_();
   assert.strictEqual(senders['no.reply.alerts@chase.com'], undefined);
   assert.strictEqual(senders['usaa.customer.service@mailcenter.usaa.com'], 'USAA');
   assert.strictEqual(senders['venmo@venmo.com'], 'Venmo');
+  assert.strictEqual(senders['americanexpress@welcome.americanexpress.com'], 'Amex');
   assert.strictEqual(ctx.isInstitutionEnabled_('Chase'), false);
 });
 
@@ -97,12 +101,14 @@ test('buildGmailQuery_ excludes disabled senders', () => {
   const ctx = loadBundle([
     ['Import USAA', true],
     ['Import Chase', false],
-    ['Import Venmo', false]
+    ['Import Venmo', false],
+    ['Import Amex', false]
   ]);
   const q = ctx.buildGmailQuery_();
   assert.match(q, /from:usaa\.customer\.service@mailcenter\.usaa\.com/);
   assert.doesNotMatch(q, /from:no\.reply\.alerts@chase\.com/);
   assert.doesNotMatch(q, /from:venmo@venmo\.com/);
+  assert.doesNotMatch(q, /from:americanexpress@welcome\.americanexpress\.com/);
   assert.match(q, /newer_than:30d/);
 });
 
@@ -110,7 +116,8 @@ test('buildGmailQuery_ uses no-match query when all institutions are off', () =>
   const ctx = loadBundle([
     ['Import USAA', false],
     ['Import Chase', false],
-    ['Import Venmo', false]
+    ['Import Venmo', false],
+    ['Import Amex', false]
   ]);
   assert.strictEqual(ctx.buildGmailQuery_(), 'label:"__gmail_transaction_alerts_none__"');
 });
