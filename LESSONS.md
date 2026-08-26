@@ -88,6 +88,18 @@ The alternative — regexing across the raw blob — would match the wrong thing
 
 **How to apply.** Detect transfer-shaped Chase mail (`You sent $…` or `Transfer alert`) and parse it in `parseChaseTransferOut_` — do not widen purchase regexes to accept Recipient/Sent on. Card Type is `transfer`; Event Type is `transfer_out`; Merchant is the recipient. Amount stays positive.
 
+### Chase date values are not always bare dates
+
+**What happened.** Chase deposit alerts label their date `Posted` and render the value as `Aug 21, 2026 at 4:02 AM ET`. `parseMonthNameDate_` is anchored with `^...$`, so handing it the whole cell returns `null` and the alert lands in Needs Review with no obvious cause.
+
+**How to apply.** Field regexes capture only the `Mon D, YYYY` portion and let trailing time, timezone, or any other suffix fall outside the capture group — never pass a whole label value to `parseMonthNameDate_`. Keep the trailing time in the fixture so a regex that swallows it fails the test.
+
+### A Chase deposit alert names no payer at all
+
+**What happened.** Chase deposit (income) alerts carry no employer, originator, sender, or memo anywhere in the message. Unlike USAA deposits (`From:`) or Zelle receipts (`NAME sent you money`), there is no counterparty to read, so Merchant has no natural source.
+
+**How to apply.** Merchant is the deposit type the alert states about itself, captured from the `You have a <type> deposit of $X` headline (subject as fallback) — `direct deposit`, `mobile deposit`. Read it, do not hardcode it: a hardcoded `direct deposit` silently mislabels every other deposit type. This is the same rule as USAA's dynamic `To:`/`From:` merchants, applied where the only honest source is the message's own description of the event.
+
 ### Prefer a fallback source over a failed parse, but never invent a value
 
 Credit merchant and amount also appear in the subject line; debit amount appears in the subject and merchant in the body headline. Falling back to those is recovering a value from a second real source — not the same as fabricating one. Chase alerts genuinely contain no cardholder name, so that field is left empty. Missing data goes to Needs Review or stays blank; it never gets guessed.
