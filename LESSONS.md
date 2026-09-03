@@ -74,7 +74,13 @@ The alternative — regexing across the raw blob — would match the wrong thing
 
 **Why it matters.** The two alert types use opposite labels for the value that belongs in Merchant: a debit uses the destination after `To:`, while a deposit uses the origin after `From:`. It is easy to swap them, continue discarding them, or allow an incomplete alert to import with an invented fallback.
 
-**How to apply.** For USAA account debits, take Merchant from the required `To:` row. For USAA deposits, take Merchant from the required `From:` row. Accept the label and value on the same line or consecutive normalized lines. If the applicable row is missing, send the alert to Needs Review. Tests must cover plain text, HTML, a changed synthetic Merchant value proving the field is dynamic, and removal of the required row.
+**How to apply.** For USAA account debits, take Merchant from the required `To:` row. For USAA deposits, take Merchant from the required `From:` row. Accept the label and value on the same line or separated by whitespace-only normalized lines. If the applicable row is missing, send the alert to Needs Review. Tests must cover plain text, HTML, a changed synthetic Merchant value proving the field is dynamic, and removal of the required row.
+
+### USAA field labels and values can have blank normalized lines between them
+
+**What happened.** The debit and deposit merchant regexes allowed a same-line value or exactly one newline after `To:` / `From:`. A live alert normalized with an additional blank line, so the required merchant was present but the message went to Needs Review.
+
+**How to apply.** When reading USAA two-cell fields, skip any number of whitespace-only lines before capturing the first nonblank value. Reject known field labels such as `Date:` or `Amount:` as values so an actually empty merchant field still goes to Needs Review. Keep regression tests for both debit `To:` and deposit `From:` rows with an intervening blank line.
 
 ### Chase debit alerts reuse the layout but not the vocabulary
 
