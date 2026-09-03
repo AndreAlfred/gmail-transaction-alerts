@@ -103,6 +103,23 @@ test('account debit merchant is taken dynamically from the To row', () => {
   assert.strictEqual(result.transaction.merchant, 'SAMPLE ELECTRIC COMPANY');
 });
 
+test('account debit allows blank lines between To and its value', () => {
+  const withBlankLine = DEBIT_PLAIN.replace(
+    /To:\n\tUSAA DEBIT\n/,
+    'To:\n\n\tUSAA DEBIT\n'
+  );
+  const result = parseAlert(BANK_SENDER, DEBIT_SUBJECT, '', withBlankLine);
+  assert.strictEqual(result.outcome, 'imported');
+  assert.strictEqual(result.transaction.merchant, 'USAA DEBIT');
+});
+
+test('account debit with an empty To value goes to review', () => {
+  const withoutMerchant = DEBIT_PLAIN.replace(/To:\n\tUSAA DEBIT\n/, 'To:\n\n');
+  const result = parseAlert(BANK_SENDER, DEBIT_SUBJECT, '', withoutMerchant);
+  assert.strictEqual(result.outcome, 'needs_review');
+  assert.strictEqual(result.reason, 'Unsupported or incomplete USAA account alert');
+});
+
 test('deposit is extracted from the plain-text body', () => {
   const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', DEPOSIT_PLAIN);
   assert.strictEqual(result.outcome, 'imported');
@@ -134,6 +151,23 @@ test('deposit merchant is taken dynamically from the From row', () => {
   const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', differentMerchant);
   assert.strictEqual(result.outcome, 'imported');
   assert.strictEqual(result.transaction.merchant, 'SAMPLE EMPLOYER PAYROLL');
+});
+
+test('deposit allows blank lines between From and its value', () => {
+  const withBlankLine = DEPOSIT_PLAIN.replace(
+    /From:\n\tUSAA CREDIT\n/,
+    'From:\n\n\tUSAA CREDIT\n'
+  );
+  const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', withBlankLine);
+  assert.strictEqual(result.outcome, 'imported');
+  assert.strictEqual(result.transaction.merchant, 'USAA CREDIT');
+});
+
+test('deposit with an empty From value goes to review', () => {
+  const withoutMerchant = DEPOSIT_PLAIN.replace(/From:\n\tUSAA CREDIT\n/, 'From:\n\n');
+  const result = parseAlert(BANK_SENDER, DEPOSIT_SUBJECT, '', withoutMerchant);
+  assert.strictEqual(result.outcome, 'needs_review');
+  assert.strictEqual(result.reason, 'Unsupported or incomplete USAA deposit alert');
 });
 
 test('an account alert without a security-zone name imports a blank cardholder', () => {

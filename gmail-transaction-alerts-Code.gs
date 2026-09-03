@@ -44,7 +44,7 @@
 
 // ===== appsscript/Config.gs =====
 var APP_CONFIG = Object.freeze({
-  parserVersion: '1.12.0',
+  parserVersion: '1.12.1',
   // USAA now sends from mailcenter; the older omem subdomain is retired and
   // was removed deliberately. Entries are matched as exact addresses -- adding
   // or correcting one is the supported fix for a rejected sender; loosening the
@@ -184,6 +184,19 @@ function usaaSecurityZoneName_(text) {
   return m ? m[1].replace(/\s+/g, ' ').trim() : '';
 }
 
+// USAA's two-cell rows can normalize with any number of blank lines between
+// the label and its value. Stop at the first nonblank line, and do not mistake
+// the next known field label for a missing value.
+function usaaLabeledValue_(text, label) {
+  var field = String(text).match(new RegExp(
+    '(?:^|\\n)[ \\t]*' + label + '[ \\t]*:[ \\t]*(?:\\n[ \\t]*)*([^\\n]+)',
+    'i'
+  ));
+  if (!field) return '';
+  var value = field[1].trim();
+  return /^(?:From|To|Date|Amount)\s*:/i.test(value) ? '' : value;
+}
+
 function parseUsaaAccountActivity_(text, activityPattern, details) {
   var activity = text.match(activityPattern);
   var date = text.match(/Date\s*:\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
@@ -205,7 +218,7 @@ function parseUsaaAccountActivity_(text, activityPattern, details) {
 // Bank-account debit alert, subject "Debit Alert for Your USAA Bank Account".
 // Body reads "$88.45 came out of your account ending in 7788." with To: and
 // Date: as two-cell table rows. After htmlToText_, a field's label and value
-// may be on the same line or consecutive lines.
+// may be on the same line or separated by blank normalized lines.
 //
 // Merchant is taken from the value following To:. The field is required because
 // it supplies the descriptive destination for the transaction. Amount stays
@@ -213,7 +226,7 @@ function parseUsaaAccountActivity_(text, activityPattern, details) {
 // Venmo receipts. Card Type is "bank debit", not "debit", because Chase
 // debit-card purchases already use "debit".
 function parseUsaaAccountDebit_(text) {
-  var merchant = String(text).match(/(?:^|\n)\s*To\s*:[ \t]*(?:\n[ \t]*)?([^\n]+)/i);
+  var merchant = usaaLabeledValue_(text, 'To');
   if (!merchant) {
     return { outcome: 'needs_review', institution: 'USAA', reason: 'Unsupported or incomplete USAA account alert' };
   }
@@ -222,7 +235,7 @@ function parseUsaaAccountDebit_(text) {
     /(\$[\d,]+(?:\.\d{2})?)\s+came out of your account ending in\s+(\d{4})/i,
     {
       cardType: 'bank debit',
-      merchant: merchant[1].trim(),
+      merchant: merchant,
       eventType: 'account_debit',
       incompleteReason: 'Unsupported or incomplete USAA account alert'
     }
@@ -232,7 +245,8 @@ function parseUsaaAccountDebit_(text) {
 // Bank-account deposit alert, subject "Deposit to Your Bank Account". Body
 // reads "You received a deposit of $42.10 to your account …3344." with
 // From:/To:/Date:/Amount: as two-cell table rows. After htmlToText_, a field's
-// label and value may be on the same line or consecutive lines. The account
+// label and value may be on the same line or separated by blank normalized
+// lines. The account
 // number is masked with an ellipsis -- a literal "..." in the plain-text part,
 // or the Unicode "…" character in the HTML-derived text -- so the last4 regex
 // accepts either.
@@ -242,7 +256,7 @@ function parseUsaaAccountDebit_(text) {
 // "deposit", distinct from the debit alert's "bank debit", because the two are
 // opposite directions on the same account.
 function parseUsaaAccountDeposit_(text) {
-  var merchant = String(text).match(/(?:^|\n)\s*From\s*:[ \t]*(?:\n[ \t]*)?([^\n]+)/i);
+  var merchant = usaaLabeledValue_(text, 'From');
   if (!merchant) {
     return { outcome: 'needs_review', institution: 'USAA', reason: 'Unsupported or incomplete USAA deposit alert' };
   }
@@ -251,7 +265,7 @@ function parseUsaaAccountDeposit_(text) {
     /received a deposit of\s+(\$[\d,]+(?:\.\d{2})?)\s+to your account\s+(?:…|\.{3})\s*(\d{4})/i,
     {
       cardType: 'deposit',
-      merchant: merchant[1].trim(),
+      merchant: merchant,
       eventType: 'deposit',
       incompleteReason: 'Unsupported or incomplete USAA deposit alert'
     }
