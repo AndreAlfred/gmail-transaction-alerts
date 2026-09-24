@@ -15,7 +15,7 @@ not import it today, for two independent reasons:
    address that is not listed makes `trustedInstitution_` return null, and the
    message is recorded as "Untrusted sender" before any parser runs.
 2. **No parser matches the format.** `parseUsaa_` requires the purchase
-   wording (`Your credit card ...7484 was charged $X at MERCHANT`) plus a
+   wording (`Your credit card ...4321 was charged $X at MERCHANT`) plus a
    `Cardholder name:` field. A bank-account debit has none of those.
 
 The alert is genuinely from USAA: DKIM `d=usaa.com` passes, SPF passes, and

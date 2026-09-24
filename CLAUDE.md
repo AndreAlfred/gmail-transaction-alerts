@@ -66,7 +66,7 @@ The script searches Gmail for messages from these exact trusted senders:
 Current parser coverage:
 
 1. **USAA purchase authorizations** matching wording like:
-   `Your credit card ...7484 was charged $7.56 at MERCHANT.`
+   `Your credit card ...4321 was charged $7.56 at MERCHANT.`
    followed by Date and Cardholder name fields\.
 2. **Chase credit\-card merchant purchases**, e\.g\. subject `You made a $12.34 transaction with SAMPLE*COFFEE SHOP`\. Field labels: Account / Date / Merchant / Amount\. Merchant and amount fall back to the subject line if the body layout changes\. Card Type is the Account product name \(lowercased\)\.
 3. **Chase debit\-card purchases**, e\.g\. subject `Your debit card transaction of $12.34 from account ending in (…1234)`\. Field labels differ: Account ending in / Made on / Description / Amount\. Merchant falls back to the body headline \(`You made a debit card transaction of $… with MERCHANT`\); amount can fall back to the subject\. Card Type is `debit` because the account row carries only `(...last4)`\.
